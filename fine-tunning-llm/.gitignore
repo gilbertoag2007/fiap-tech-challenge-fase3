@@ -1,0 +1,33 @@
+# Ambiente virtual e arquivos de configuracao local
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# Cache e artefatos do Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Configuracoes locais de IDE
+.vscode/
+.idea/
+
+# Dados sensiveis e arquivos gerados pelo pipeline
+app/data/raw/*
+!app/data/raw/.gitkeep
+app/data/processed/*
+!app/data/processed/.gitkeep
+app/data/training/*
+!app/data/training/.gitkeep
+
+# Arquivos temporarios criados pelo Excel
+~$*.xlsx
+*.tmp
+*.log
