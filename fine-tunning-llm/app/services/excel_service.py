@@ -21,5 +21,8 @@ class ExcelService:
             raise ValueError("O arquivo de destino deve possuir a extensão .xlsx.")
 
         caminho_arquivo.parent.mkdir(parents=True, exist_ok=True)
+        if caminho_arquivo.exists():
+            caminho_arquivo.unlink()
+
         dataframe.to_excel(caminho_arquivo, index=False)
         return caminho_arquivo
