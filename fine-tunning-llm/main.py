@@ -1,13 +1,29 @@
+from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 
-from app.services.ingestao_service import ExcelIngestaoService
+import pandas as pd
+from app.services.arquivo_service import ArquivoService
+
 from app.services.pii_service import PiiService
 from app.services.qualidade_service import QualidadeService
 
 
+""" Colunas do arquivo a serem analisadas para verificar existencia de PII """
 COLUNAS_ANALISADAS_PII: tuple[str, ...] = (
+    "papel_solicitante",
+    "contexto_solicitacao",
+    "hipotese_clinica",
+    "especialidade_medica",
+    "tipo_pergunta",
+    "diagnostico_confirmado",
+    "exames_relevantes",
+    "medicamentos_utilizados",
+    "alergias",
+    "diagnosticos_anteriores",
     "pergunta_original",
     "resposta_estruturada",
+    "prontuario_contexto",
 )
 
 
@@ -17,36 +33,41 @@ def exibir_menu(opcoes_menu: dict[str, str]) -> None:
         print(f"{numero_opcao} - {descricao_opcao}")
 
 
-def executar_etapa_1(servico_ingestao: ExcelIngestaoService):
-    resultado_ingestao = servico_ingestao.gerar_dataframe()
+def executar_etapa_1(servico_arquivos: ArquivoService, caminho_arquivo: Path) -> pd.DataFrame:
+
+    print (f"INICIANDO A ETAPA 1 - LEITURA DO ARQUIVO EXCEL: {caminho_arquivo}")
+
+    dataframe_original = servico_arquivos.gerar_dataframe(caminho_arquivo)
     print(
         "Dataframe gerado com sucesso: "
-        f"{resultado_ingestao.qtd_linhas} linhas e "
-        f"{resultado_ingestao.colunas_df} colunas."
+        f"{dataframe_original.shape[0]} linhas e "
+        f"{dataframe_original.shape[1]} colunas."
     )
-    return resultado_ingestao.dataframe
+    print ("ETAPA 1 CONCLUÍDA")
+    print ("*" * 50)
+    return dataframe_original
 
 
 def executar_etapa_2(
     servico_qualidade: QualidadeService,
-    dataframe_original,
-    caminho_relatorio_repetidos_antes: Path,
-    caminho_relatorio_ausentes_antes: Path,
+    dataframe_original   
 ) -> None:
-    resultado_repetidos = servico_qualidade.analisar_registros_repetidos(
+
+    print(f"INICIANDO A ETAPA 2 - VERIFICAÇÃO REGISTROS REPETIDOS E COLUNAS AUSENTES")
+            
+    caminho_rel_repetidos = servico_qualidade.analisar_registros_repetidos(
         dataframe_original,
-        caminho_relatorio_repetidos_antes,
+        Path("app/data/relatorios/registros_repetidos_antes.txt"),
     )
-    resultado_ausentes = servico_qualidade.analisar_registros_com_colunas_ausentes(
+    caminho_rel_ausentes = servico_qualidade.analisar_registros_com_colunas_ausentes(
         dataframe_original,
-        caminho_relatorio_ausentes_antes,
+        Path("app/data/relatorios/registros_ausentes_antes.txt"),
     )
 
-    print(resultado_repetidos.mensagem_resumo)
-    print(f"Relatório gerado em: {resultado_repetidos.caminho_relatorio}")
-    print(resultado_ausentes.mensagem_resumo)
-    print(f"Relatório gerado em: {resultado_ausentes.caminho_relatorio}")
-
+    print(f"Relatório de registros repetidos: {caminho_rel_repetidos}")
+    print(f"Relatório de registros com colunas ausentes: {caminho_rel_ausentes}")
+    print(f"ETAPA 2 CONCLUÍDA")
+    print ("*" * 50)
 
 def executar_etapa_3(
     servico_qualidade: QualidadeService,
@@ -55,140 +76,104 @@ def executar_etapa_3(
     caminho_relatorio_repetidos_depois: Path,
     caminho_relatorio_ausentes_depois: Path,
 ):
-    resultado_tratamento = servico_qualidade.remover_registros_repetidos(
+    print(f"INICIANDO A ETAPA 3 - REMOVER REGISTROS REPETIDOS E COM COLUNAS AUSENTES")    
+
+    resultado_tratamento_repetidos = servico_qualidade.remover_registros_repetidos(
         dataframe_original,
         caminho_arquivo_tratado,
     )
-    dataframe_tratado = resultado_tratamento.dataframe_tratado
+    dataframe_auditoria = resultado_tratamento_repetidos.dataframe_tratado
 
-    resultado_repetidos = servico_qualidade.analisar_registros_repetidos(
-        dataframe_tratado,
+    caminho_rel_repetidos_pos_tratamento = servico_qualidade.analisar_registros_repetidos(
+        dataframe_auditoria,
         caminho_relatorio_repetidos_depois,
     )
 
     resultado_tratamento_ausentes = servico_qualidade.remover_registros_com_colunas_ausentes(
-        dataframe_tratado,
+        dataframe_auditoria,
         caminho_arquivo_tratado,
     )
-    dataframe_tratado = resultado_tratamento_ausentes.dataframe_tratado
-    resultado_ausentes = servico_qualidade.analisar_registros_com_colunas_ausentes(
-        dataframe_tratado,
+    dataframe_auditoria = resultado_tratamento_ausentes.dataframe_tratado
+    caminho_rel_ausentes_pos_tratamento = servico_qualidade.analisar_registros_com_colunas_ausentes(
+        dataframe_auditoria,
         caminho_relatorio_ausentes_depois,
     )
 
     print("Inconsistências tratadas com sucesso.")
     print(
         "Registros repetidos removidos: "
-        f"{resultado_tratamento.linhas_repetidas_removidas}"
+        f"{resultado_tratamento_repetidos.linhas_tratadas}"
     )
-    print(f"Validação pós-tratamento de repetidos: {resultado_repetidos.mensagem_resumo}")
+    print (f"Relatório de registros repetidos gerado em: {caminho_rel_repetidos_pos_tratamento}")
+    
     print(
         "Registros com colunas ausentes tratados: "
-        f"{resultado_tratamento_ausentes.linhas_com_ausencias_removidas}"
+        f"{resultado_tratamento_ausentes.linhas_tratadas}"
     )
-    print(f"Validação pós-tratamento de ausentes: {resultado_ausentes.mensagem_resumo}")
+    print(f"Relatório de registros com colunas ausentes gerado em: {caminho_rel_ausentes_pos_tratamento}")
+
     print(
         "Arquivo Excel tratado gerado em: "
         f"{resultado_tratamento_ausentes.caminho_arquivo_tratado}"
     )
-    return dataframe_tratado
+
+    print ("ETAPA 3 CONCLUÍDA")
+    print ("*" * 50)
+
+    return dataframe_auditoria
 
 
 def executar_etapa_4(
     servico_pii: PiiService,
     dataframe_tratado,
-    caminho_relatorio_pii: Path,
     caminho_arquivo_tratado: Path,
 ):
-    resultado_pii = servico_pii.identificar_pii(
+    # Registra o momento inicial e inicia a medição da duração da etapa.
+    data_hora_inicio = datetime.now()
+    inicio_execucao = perf_counter()
+
+    print("INICIANDO A ETAPA 4 - IDENTIFICAÇÃO E TRATAMENTO DE PII")
+    print(f"Data e hora de início: {data_hora_inicio:%d/%m/%Y %H:%M:%S}")
+
+    # Executa o fluxo de identificação e futuro tratamento das PII.
+    resultado_pii = servico_pii.identificar_e_tratar_pii(
         dataframe=dataframe_tratado,
-        colunas_analisadas=COLUNAS_ANALISADAS_PII,
-        caminho_relatorio=caminho_relatorio_pii,
+        colunas_analisar=list(COLUNAS_ANALISADAS_PII),
         caminho_arquivo_tratado=caminho_arquivo_tratado,
-    )
-
-    print(f"Evidências de PII identificadas: {resultado_pii.total_evidencias}")
-    print(f"Relatório de PII gerado em: {resultado_pii.caminho_relatorio}")
-    print(f"Arquivo Excel atualizado em: {resultado_pii.caminho_arquivo_tratado}")
-    return resultado_pii.dataframe_tratado
-
-
-def executar_etapa_4_2(
-    servico_pii: PiiService,
-    dataframe_tratado,
-    caminho_arquivo_tratado: Path,
-):
-    resultado_anonimizacao = servico_pii.anonimizar_pii_deterministico(
-        dataframe=dataframe_tratado,
-        caminho_arquivo_tratado=caminho_arquivo_tratado,
+        percentual_dataframe=100,
     )
 
     print(
-        "Registros anonimizados: "
-        f"{resultado_anonimizacao.total_registros_anonimizados}"
+        "Arquivo Excel atualizado em: "
+        f"{resultado_pii.caminho_arquivo_tratado}"
     )
+    # Calcula e apresenta o tempo total depois que o processamento termina.
+    duracao_execucao = perf_counter() - inicio_execucao
+    minutos, segundos = divmod(duracao_execucao, 60)
     print(
-        "Arquivo Excel anonimizado em: "
-        f"{resultado_anonimizacao.caminho_arquivo_tratado}"
+        f"Tempo de execução: {int(minutos)} minutos e "
+        f"{segundos:.2f} segundos"
     )
-    return resultado_anonimizacao.dataframe_tratado
+    print("ETAPA 4 CONCLUÍDA")
+    print("*" * 50)
 
-
-def executar_todas_as_etapas(
-    servico_ingestao: ExcelIngestaoService,
-    servico_qualidade: QualidadeService,
-    servico_pii: PiiService,
-    caminho_arquivo_tratado: Path,
-    caminho_relatorio_repetidos_antes: Path,
-    caminho_relatorio_ausentes_antes: Path,
-    caminho_relatorio_repetidos_depois: Path,
-    caminho_relatorio_ausentes_depois: Path,
-    caminho_relatorio_pii: Path,
-) -> None:
-    dataframe_original = executar_etapa_1(servico_ingestao)
-    executar_etapa_2(
-        servico_qualidade,
-        dataframe_original,
-        caminho_relatorio_repetidos_antes,
-        caminho_relatorio_ausentes_antes,
-    )
-    dataframe_tratado = executar_etapa_3(
-        servico_qualidade,
-        dataframe_original,
-        caminho_arquivo_tratado,
-        caminho_relatorio_repetidos_depois,
-        caminho_relatorio_ausentes_depois,
-    )
-    executar_etapa_4(
-        servico_pii,
-        dataframe_tratado,
-        caminho_relatorio_pii,
-        caminho_arquivo_tratado,
-    )
-
+    return resultado_pii.dataframe_resultado
 
 def main() -> None:
-    caminho_arquivo_origem = Path("app/data/raw/dados_medicos_base_V3.xlsx")
-    caminho_arquivo_tratado = Path("app/data/processed/dados_medicos_base_V3_tratado.xlsx")
-    caminho_relatorio_repetidos_antes = Path("app/data/relatorios/registros_repetidos_antes.txt")
-    caminho_relatorio_ausentes_antes = Path("app/data/relatorios/registros_com_colunas_ausentes_antes.txt")
-    caminho_relatorio_repetidos_depois = Path("app/data/relatorios/registros_repetidos_depois.txt")
-    caminho_relatorio_ausentes_depois = Path("app/data/relatorios/registros_com_colunas_ausentes_depois.txt")
-    caminho_relatorio_pii = Path("app/data/relatorios/identificacao_pii.txt")
+    caminho_arquivo_auditoria = Path("app/data/processado/dados_medicos_auditoria.xlsx")
 
-    servico_ingestao = ExcelIngestaoService(caminho_arquivo_origem)
+    servico_arquivos = ArquivoService()
     servico_qualidade = QualidadeService()
     servico_pii = PiiService()
     dataframe_original = None
-    dataframe_tratado = None
+    dataframe_auditoria = None
 
     opcoes_menu = {
         "0": "Executar todas as etapas",
         "1": "Ler arquivo excel e gerar dataframe",
-        "2": "Verificar qualidade do arquivo e tratar erros",
+        "2": "Identificar registros repetidos e colunas ausentes",
         "3": "Tratar inconsistências encontradas",
-        "4": "Identificar PII",
-        "4.2": "Anonimizar PII Deterministico",
+        "4": "Identificar e tratar PII",
         "5": "Executar Fine Tunning",
         "6": "Sair",
     }
@@ -210,36 +195,33 @@ def main() -> None:
         print(f"Opcao selecionada: {opcoes_menu[opcao_escolhida]}")
 
         if opcao_escolhida == "0":
-            dataframe_original = executar_etapa_1(servico_ingestao)
-            executar_etapa_2(
+
+            # Etapa 1 - Leitura do arquivo Excel e geração do dataframe
+            dataframe_original = executar_etapa_1(servico_arquivos,Path("app/data/original/dados_medicos_base.xlsx")) 
+
+            # Etapa 2 - Identificação de registros repetidos e colunas ausentes
+            executar_etapa_2( servico_qualidade, dataframe_original)
+          
+            # Etapa 3 - Tratamento de registros repetidos e colunas ausentes
+            dataframe_auditoria = executar_etapa_3(
                 servico_qualidade,
                 dataframe_original,
-                caminho_relatorio_repetidos_antes,
-                caminho_relatorio_ausentes_antes,
+                caminho_arquivo_auditoria,
+                Path("app/data/relatorios/registros_repetidos_depois.txt"),
+                Path("app/data/relatorios/registros_com_colunas_ausentes_depois.txt")
+   
             )
-            dataframe_tratado = executar_etapa_3(
-                servico_qualidade,
-                dataframe_original,
-                caminho_arquivo_tratado,
-                caminho_relatorio_repetidos_depois,
-                caminho_relatorio_ausentes_depois,
-            )
-            dataframe_tratado = executar_etapa_4(
+
+            # Etapa 4 - Identificação e tratamento de PII
+            dataframe_auditoria = executar_etapa_4(
                 servico_pii,
-                dataframe_tratado,
-                caminho_relatorio_pii,
-                caminho_arquivo_tratado,
+                dataframe_auditoria,
+                caminho_arquivo_auditoria,
             )
-            dataframe_tratado = executar_etapa_4_2(
-                servico_pii,
-                dataframe_tratado,
-                caminho_arquivo_tratado,
-            )
-            continue
 
         if opcao_escolhida == "1":
-            dataframe_original = executar_etapa_1(servico_ingestao)
-            dataframe_tratado = dataframe_original
+            dataframe_original = executar_etapa_1(servico_arquivos)
+           
             continue
 
         if opcao_escolhida == "2":
@@ -247,12 +229,7 @@ def main() -> None:
                 print("Carregue o dataframe na opção 1 antes de executar a qualidade.")
                 continue
 
-            executar_etapa_2(
-                servico_qualidade,
-                dataframe_original,
-                caminho_relatorio_repetidos_antes,
-                caminho_relatorio_ausentes_antes,
-            )
+            executar_etapa_2( servico_qualidade, dataframe_original)
             continue
 
         if opcao_escolhida == "3":
@@ -260,40 +237,28 @@ def main() -> None:
                 print("Carregue o dataframe na opção 1 antes de tratar inconsistências.")
                 continue
 
-            dataframe_tratado = executar_etapa_3(
-                servico_qualidade,
-                dataframe_original,
-                caminho_arquivo_tratado,
-                caminho_relatorio_repetidos_depois,
-                caminho_relatorio_ausentes_depois,
-            )
+            dataframe_auditoria = executar_etapa_3(
+                            servico_qualidade,
+                            dataframe_original,
+                            caminho_arquivo_auditoria,
+                            Path("app/data/relatorios/registros_repetidos_depois.txt"),
+                            Path("app/data/relatorios/registros_com_colunas_ausentes_depois.txt")
+            )                
             continue
 
         if opcao_escolhida == "4":
-            if dataframe_tratado is None:
-                print("Carregue o dataframe na opção 1 antes de identificar PII.")
+            if dataframe_auditoria is None:
+                print("Execute a opção 3 antes de identificar e tratar PII.")
                 continue
 
-            dataframe_tratado = executar_etapa_4(
+            dataframe_auditoria = executar_etapa_4(
                 servico_pii,
-                dataframe_tratado,
-                caminho_relatorio_pii,
-                caminho_arquivo_tratado,
+                dataframe_auditoria,
+                caminho_arquivo_auditoria,
             )
             continue
 
-        if opcao_escolhida == "4.2":
-            if dataframe_tratado is None or "possui_pii" not in dataframe_tratado.columns:
-                print("Execute a opcao 4 antes de anonimizar PII.")
-                continue
-
-            dataframe_tratado = executar_etapa_4_2(
-                servico_pii,
-                dataframe_tratado,
-                caminho_arquivo_tratado,
-            )
-            continue
-
+      
         if opcao_escolhida == "5":
             print("A etapa de fine tuning ainda não foi implementada.")
             continue

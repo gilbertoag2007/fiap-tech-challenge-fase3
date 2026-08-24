@@ -20,7 +20,8 @@ htmlcov/
 .idea/
 
 # Dados sensiveis e arquivos gerados pelo pipeline
-app/data/raw/*
+app/data/relatorios/*
+app/data/processado/*
 !app/data/raw/.gitkeep
 app/data/processed/*
 !app/data/processed/.gitkeep

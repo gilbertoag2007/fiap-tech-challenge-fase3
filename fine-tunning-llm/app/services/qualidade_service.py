@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from app.services.excel_service import ExcelService
+from app.services.arquivo_service import ArquivoService
 
 # Colunas monitoradas para identificar ausências nos registros do dataframe.
 COLUNAS_MONITORADAS: tuple[str, ...] = (
@@ -19,25 +19,13 @@ COLUNAS_MONITORADAS: tuple[str, ...] = (
     "tipo_pergunta",
     "diagnostico_confirmado",
 )
-CAMINHO_ARQUIVO_TRATADO = Path("app/data/processed/dados_medicos_base_V3_tratado.xlsx")
 
-@dataclass(frozen=True)
-class AnaliseInconsistenciaResult:
-    caminho_relatorio: Path
-    mensagem_resumo: str
 
 
 @dataclass(frozen=True)
-class TratamentoDuplicadosResult:
+class TratamentoResult:
     dataframe_tratado: pd.DataFrame
-    linhas_repetidas_removidas: int
-    caminho_arquivo_tratado: Path
-
-
-@dataclass(frozen=True)
-class TratamentoAusentesResult:
-    dataframe_tratado: pd.DataFrame
-    linhas_com_ausencias_removidas: int
+    linhas_tratadas: int
     caminho_arquivo_tratado: Path
 
 
@@ -45,104 +33,90 @@ class QualidadeService:
     def __init__(
         self,
         colunas: tuple[str, ...] = COLUNAS_MONITORADAS,
-        servico_excel: ExcelService | None = None,
+        servico_arquivo: ArquivoService | None = None,
     ) -> None:
         self.colunas_monitoradas = colunas
-        self.servico_excel = servico_excel or ExcelService()
+        self.servico_arquivo = servico_arquivo or ArquivoService()
 
     def analisar_registros_repetidos(
         self,
         dataframe: pd.DataFrame,
         caminho_relatorio: Path,
-    ) -> AnaliseInconsistenciaResult:
+    ) -> Path | None:
+        # Gera o relatório apenas quando houver pelo menos um registro repetido.
         linhas_repetidas = dataframe.index[dataframe.duplicated(keep=False)]
-        linhas_repetidas_formatadas = [str(indice + 2) for indice in linhas_repetidas]
-
-        caminho_relatorio.parent.mkdir(parents=True, exist_ok=True)
-        with caminho_relatorio.open("w", encoding="utf-8") as arquivo_relatorio:
-            if not linhas_repetidas_formatadas:
-                arquivo_relatorio.write("Nenhum registro repetido foi identificado.\n")
-            else:
-                arquivo_relatorio.write("Linhas repetidas identificadas:\n")
-                for linha in linhas_repetidas_formatadas:
-                    arquivo_relatorio.write(f"Linha {linha}\n")
-
-        if not linhas_repetidas_formatadas:
-            mensagem_resumo = "Nenhuma inconsistência encontrada nos registros repetidos."
-        else:
-            mensagem_resumo = (
-                f"Foram identificadas {len(linhas_repetidas_formatadas)} linhas repetidas."
-            )
-
-        return AnaliseInconsistenciaResult(
-            caminho_relatorio=caminho_relatorio,
-            mensagem_resumo=mensagem_resumo,
+        conteudo = (
+            "\n".join(f"Linha {indice + 2}" for indice in linhas_repetidas)
+            if len(linhas_repetidas) > 0
+            else "Registros repetidos não encontrados."
+        )
+        return self.servico_arquivo.criar_arquivo_txt(
+            "Linhas repetidas identificadas:",
+            conteudo,
+            caminho_relatorio,
         )
 
     def analisar_registros_com_colunas_ausentes(
         self,
         dataframe: pd.DataFrame,
         caminho_relatorio: Path,
-    ) -> AnaliseInconsistenciaResult:
+    ) -> Path | None:
+        # Gera o relatório apenas quando houver registros com colunas ausentes.
         linhas_ausentes = self._coletar_valores_ausentes(dataframe)
-
-        caminho_relatorio.parent.mkdir(parents=True, exist_ok=True)
-        with caminho_relatorio.open("w", encoding="utf-8") as arquivo_relatorio:
-            if not linhas_ausentes:
-                arquivo_relatorio.write("Nenhuma coluna ausente foi identificada.\n")
-            else:
-                arquivo_relatorio.write("Registros com colunas ausentes:\n")
-                for linha in linhas_ausentes:
-                    arquivo_relatorio.write(f"{linha}\n")
-
-        if not linhas_ausentes:
-            mensagem_resumo = "Nenhuma inconsistência encontrada nas colunas ausentes."
-        else:
-            mensagem_resumo = (
-                f"Foram identificados {len(linhas_ausentes)} registros com colunas ausentes."
-            )
-
-        return AnaliseInconsistenciaResult(
-            caminho_relatorio=caminho_relatorio,
-            mensagem_resumo=mensagem_resumo,
+        conteudo = (
+            "\n".join(linhas_ausentes)
+            if linhas_ausentes
+            else "Registros com colunas ausentes não encontrados."
+        )
+        return self.servico_arquivo.criar_arquivo_txt(
+            "Registros com colunas ausentes:",
+            conteudo,
+            caminho_relatorio,
         )
 
     def remover_registros_repetidos(
         self,
         dataframe: pd.DataFrame,
-        caminho_arquivo_tratado: Path = CAMINHO_ARQUIVO_TRATADO,
-    ) -> TratamentoDuplicadosResult:
+        caminho_arquivo_tratado: Path
+    ) -> TratamentoResult:
+        """Remove registros repetidos, salva o resultado e retorna o resumo."""
+        # Remove as duplicidades e reorganiza os índices do dataframe tratado.
         dataframe_tratado = dataframe.drop_duplicates().reset_index(drop=True)
         total_linhas_removidas = len(dataframe) - len(dataframe_tratado)
-        caminho_arquivo_tratado = self.servico_excel.criar_excel(
+        # Salva o dataframe tratado no caminho informado.
+        caminho_arquivo_tratado = self.servico_arquivo.atualizar_excel(
             dataframe_tratado,
             caminho_arquivo_tratado,
         )
 
-        return TratamentoDuplicadosResult(
+        return TratamentoResult(
             dataframe_tratado=dataframe_tratado,
-            linhas_repetidas_removidas=total_linhas_removidas,
+            linhas_tratadas=total_linhas_removidas,
             caminho_arquivo_tratado=caminho_arquivo_tratado,
         )
 
     def remover_registros_com_colunas_ausentes(
         self,
         dataframe: pd.DataFrame,
-        caminho_arquivo_tratado: Path = CAMINHO_ARQUIVO_TRATADO,
-    ) -> TratamentoAusentesResult:
+        caminho_arquivo_tratado: Path 
+    ) -> TratamentoResult:
+        """Remove registros com valores ausentes, salva o resultado e retorna o resumo."""
+        # Identifica as linhas que possuem alguma coluna monitorada ausente.
         indices_ausentes = self._coletar_indices_ausentes(dataframe)
         mascara_ausentes = dataframe.index.isin(indices_ausentes)
 
+        # Mantém somente os registros completos e reorganiza seus índices.
         dataframe_tratado = dataframe.loc[~mascara_ausentes].reset_index(drop=True)
         total_linhas_removidas = len(dataframe) - len(dataframe_tratado)
-        caminho_arquivo_tratado = self.servico_excel.criar_excel(
+        # Salva o dataframe tratado no caminho informado.
+        caminho_arquivo_tratado = self.servico_arquivo.atualizar_excel(
             dataframe_tratado,
             caminho_arquivo_tratado,
         )
 
-        return TratamentoAusentesResult(
+        return TratamentoResult(
             dataframe_tratado=dataframe_tratado,
-            linhas_com_ausencias_removidas=total_linhas_removidas,
+            linhas_tratadas=total_linhas_removidas,
             caminho_arquivo_tratado=caminho_arquivo_tratado,
         )
 
