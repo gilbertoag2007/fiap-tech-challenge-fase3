@@ -13,6 +13,9 @@ from app.services.qualidade_service import QualidadeService
 COLUNAS_ANALISADAS_PII: tuple[str, ...] = (
     "papel_solicitante",
     "contexto_solicitacao",
+    "pergunta_original",
+    "prontuario_contexto",
+    "resposta_estruturada",
     "hipotese_clinica",
     "especialidade_medica",
     "tipo_pergunta",
@@ -21,9 +24,9 @@ COLUNAS_ANALISADAS_PII: tuple[str, ...] = (
     "medicamentos_utilizados",
     "alergias",
     "diagnosticos_anteriores",
-    "pergunta_original",
-    "resposta_estruturada",
-    "prontuario_contexto",
+    
+
+
 )
 
 
@@ -140,7 +143,7 @@ def executar_etapa_4(
         dataframe=dataframe_tratado,
         colunas_analisar=list(COLUNAS_ANALISADAS_PII),
         caminho_arquivo_tratado=caminho_arquivo_tratado,
-        percentual_dataframe=100,
+        percentual_dataframe=1,
     )
 
     print(

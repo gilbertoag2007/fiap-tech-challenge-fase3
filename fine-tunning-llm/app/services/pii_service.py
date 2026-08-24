@@ -5,6 +5,8 @@ from pathlib import Path
 import pandas as pd
 from presidio_analyzer import AnalyzerEngine, Pattern, PatternRecognizer
 from presidio_analyzer.nlp_engine import SpacyNlpEngine
+from presidio_anonymizer import AnonymizerEngine
+from presidio_anonymizer.entities import OperatorConfig
 
 from app.services.arquivo_service import ArquivoService
 
@@ -18,7 +20,11 @@ class ResultadoIdentificacaoPii:
 
 
 class PiiService:
-    """Identifica PII nas colunas textuais de um dataframe."""
+    """Identifica e anonimiza PII nas colunas textuais de um dataframe."""
+
+    CAMINHO_ARQUIVO_AUDITORIA = Path(
+        "app/data/processado/dados_medicos_auditoria.xlsx"
+    )
 
     ENTIDADES_PII = (
         "PERSON",
@@ -26,6 +32,13 @@ class PiiService:
         "DATE_TIME",
         "CPF",
     )
+
+    TOKENS_ANONIMIZACAO = {
+        "PERSON": "[nome do paciente]",
+        "PHONE_NUMBER": "[Telefone do paciente]",
+        "DATE_TIME": "[Data de nascimento]",
+        "CPF": "[cpf]",
+    }
 
     def __init__(self, servico_arquivo: ArquivoService | None = None) -> None:
         """Inicializa o Presidio com o modelo local de portugues."""
@@ -37,6 +50,7 @@ class PiiService:
             nlp_engine=motor_nlp,
             supported_languages=["pt"],
         )
+        self.anonymizer = AnonymizerEngine()
         self.analyzer.registry.add_recognizer(
             PatternRecognizer(
                 supported_entity="CPF",
@@ -58,7 +72,7 @@ class PiiService:
         caminho_arquivo_tratado: Path | None = None,
         percentual_dataframe: float = 100.0,
     ) -> ResultadoIdentificacaoPii:
-        """Coordena a identificacao e o futuro tratamento das PII."""
+        """Coordena a identificacao e a anonimizacao das PII."""
         # Executa a identificacao e inclui as informacoes de PII no dataframe.
         resultado = self.identificar_pii(
             dataframe=dataframe,
@@ -67,10 +81,89 @@ class PiiService:
             percentual_dataframe=percentual_dataframe,
         )
 
-        # A chamada da futura anonimizacao sera adicionada neste ponto do fluxo.
+        dataframe_anonimizado = self.anonimizar_pii(
+            dataframe=resultado.dataframe_resultado,
+            colunas_analisar=["pergunta_original"]),
+        
+
+        if dataframe_anonimizado is not None:
+            resultado.dataframe_resultado = dataframe_anonimizado
+            resultado.caminho_arquivo_tratado = self.CAMINHO_ARQUIVO_AUDITORIA
 
         # Retorna o dataframe atualizado e o caminho do arquivo Excel tratado.
         return resultado
+
+    def anonimizar_pii(
+        self,
+        dataframe: pd.DataFrame,
+        colunas_analisar: list[str],
+    ) -> pd.DataFrame | None:
+        """Anonimiza as PII identificadas e atualiza o arquivo de auditoria."""
+        dataframe_resultado = dataframe
+        linhas_com_pii = dataframe_resultado["possui_pii"] == "Sim"
+        houve_atualizacao = False
+
+        for indice, registro in dataframe_resultado.loc[linhas_com_pii].iterrows():
+            entidades = {
+                entidade.strip()
+                for entidade in str(registro["entidades identificadas"]).split(",")
+                if entidade.strip() in self.TOKENS_ANONIMIZACAO
+            }
+
+            if not entidades:
+                continue
+
+            operadores = {
+                entidade: OperatorConfig(
+                    "replace",
+                    {"new_value": self.TOKENS_ANONIMIZACAO[entidade]},
+                )
+                for entidade in entidades
+            }
+
+            for coluna in colunas_analisar:
+                valor = registro[coluna]
+
+                if pd.isna(valor) or not str(valor).strip():
+                    continue
+
+                texto_original = str(valor)
+                resultados = self.analyzer.analyze(
+                    text=texto_original,
+                    language="pt",
+                    entities=list(entidades),
+                )
+
+                if not resultados:
+                    continue
+
+                texto_anonimizado = self.anonymizer.anonymize(
+                    text=texto_original,
+                    analyzer_results=resultados,
+                    operators=operadores,
+                ).text
+
+                if texto_anonimizado == texto_original:
+                    continue
+
+                coluna_anonimizada = f"{coluna}_anonimizado"
+                if coluna_anonimizada not in dataframe_resultado.columns:
+                    # Mantem os valores originais nas linhas que nao possuem PII.
+                    dataframe_resultado[coluna_anonimizada] = dataframe_resultado[
+                        coluna
+                    ].astype("object")
+
+                dataframe_resultado.at[indice, coluna_anonimizada] = texto_anonimizado
+                houve_atualizacao = True
+
+        if not houve_atualizacao:
+            return None
+
+        self.servico_arquivo.atualizar_excel(
+            dataframe_resultado,
+            self.CAMINHO_ARQUIVO_AUDITORIA,
+        )
+        return dataframe_resultado
 
     def identificar_pii(
         self,
