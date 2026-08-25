@@ -83,15 +83,100 @@ class PiiService:
 
         dataframe_anonimizado = self.anonimizar_pii(
             dataframe=resultado.dataframe_resultado,
-            colunas_analisar=["pergunta_original"]),
-        
+            colunas_analisar=["pergunta_original"],
+        )
 
         if dataframe_anonimizado is not None:
             resultado.dataframe_resultado = dataframe_anonimizado
             resultado.caminho_arquivo_tratado = self.CAMINHO_ARQUIVO_AUDITORIA
 
+        prontuario_anonimizado = self.anonimizar_prontuario_contexto(
+            dataframe=resultado.dataframe_resultado,
+        )
+
+        if prontuario_anonimizado is not None:
+            resultado.dataframe_resultado = prontuario_anonimizado
+            resultado.caminho_arquivo_tratado = self.CAMINHO_ARQUIVO_AUDITORIA
+
         # Retorna o dataframe atualizado e o caminho do arquivo Excel tratado.
         return resultado
+
+    def anonimizar_prontuario_contexto(
+        self,
+        dataframe: pd.DataFrame,
+    ) -> pd.DataFrame | None:
+        """Remove nome e CPF do prontuario e reorganiza os dados do paciente."""
+        coluna_original = "prontuario_contexto"
+        coluna_anonimizada = "prontuario_contexto_anonimizado"
+
+        if coluna_original not in dataframe.columns:
+            return None
+
+        houve_anonimizacao = False
+        linhas_com_pii = dataframe["possui_pii"] == "Sim"
+        entidades_por_campo = {"nome": "PERSON", "cpf": "CPF"}
+
+        for indice, valor in dataframe.loc[linhas_com_pii, coluna_original].items():
+            if pd.isna(valor) or not str(valor).strip():
+                continue
+
+            texto_original = str(valor)
+            linha_sexo = ""
+            demais_linhas: list[str] = []
+
+            for linha in texto_original.splitlines():
+                linha = linha.strip()
+                campo, separador, conteudo = linha.partition(":")
+                campo_normalizado = campo.casefold()
+
+                if separador and campo_normalizado in entidades_por_campo:
+                    entidade = entidades_por_campo[campo_normalizado]
+                    resultados = self.analyzer.analyze(
+                        text=conteudo,
+                        language="pt",
+                        entities=[entidade],
+                    )
+                    # O Presidio remove o valor sensivel antes de excluir o campo.
+                    self.anonymizer.anonymize(
+                        text=conteudo,
+                        analyzer_results=resultados,
+                        operators={entidade: OperatorConfig("redact", {})},
+                    )
+                    continue
+
+                if separador and campo_normalizado == "sexo":
+                    sexo = conteudo.strip().removesuffix(".")
+                    linha_sexo = f"Paciente do Sexo {sexo}."
+                    continue
+
+                if linha:
+                    demais_linhas.append(linha)
+
+            linhas_anonimizadas = [linha_sexo, *demais_linhas]
+            texto_anonimizado = "\n".join(
+                linha for linha in linhas_anonimizadas if linha
+            )
+
+            if texto_anonimizado == texto_original:
+                continue
+
+            if coluna_anonimizada not in dataframe.columns:
+                # Preserva o conteudo das linhas que nao precisam de anonimizacao.
+                dataframe[coluna_anonimizada] = dataframe[coluna_original].astype(
+                    "object"
+                )
+
+            dataframe.at[indice, coluna_anonimizada] = texto_anonimizado
+            houve_anonimizacao = True
+
+        if not houve_anonimizacao:
+            return None
+
+        self.servico_arquivo.atualizar_excel(
+            dataframe,
+            self.CAMINHO_ARQUIVO_AUDITORIA,
+        )
+        return dataframe
 
     def anonimizar_pii(
         self,
