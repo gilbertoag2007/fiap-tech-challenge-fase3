@@ -5,6 +5,7 @@ from time import perf_counter
 import pandas as pd
 from app.services.arquivo_service import ArquivoService
 
+from app.services.fine_tuning_service import FineTuningService
 from app.services.pii_service import PiiService
 from app.services.qualidade_service import QualidadeService
 
@@ -143,7 +144,7 @@ def executar_etapa_4(
         dataframe=dataframe_tratado,
         colunas_analisar=list(COLUNAS_ANALISADAS_PII),
         caminho_arquivo_tratado=caminho_arquivo_tratado,
-        percentual_dataframe=1,
+        percentual_dataframe=100,
     )
 
     print(
@@ -162,14 +163,54 @@ def executar_etapa_4(
 
     return resultado_pii.dataframe_resultado
 
+
+def executar_etapa_5(
+    servico_fine_tuning: FineTuningService,
+) -> pd.DataFrame:
+    print("INICIANDO A ETAPA 5 - PREPARACAO DO DATAFRAME PARA FINE-TUNING")
+
+    dataframe_fine_tuning = servico_fine_tuning.gerar_dataframe_fine_tuning()
+
+    print(
+        "Dataframe de fine-tuning gerado com sucesso: "
+        f"{dataframe_fine_tuning.shape[0]} linhas e "
+        f"{dataframe_fine_tuning.shape[1]} colunas."
+    )
+    print(
+        "Arquivo Excel gerado em: "
+        f"{servico_fine_tuning.CAMINHO_ARQUIVO_FINE_TUNING}"
+    )
+    print("ETAPA 5 CONCLUIDA")
+    print("*" * 50)
+
+    return dataframe_fine_tuning
+
+
+def executar_etapa_6(servico_fine_tuning: FineTuningService) -> Path:
+    """Executa a inferencia-base nos exemplos definidos para comparacao."""
+    identificadores_exemplos = {2, 3, 6}
+
+    print("INICIANDO A ETAPA 6 - INFERENCIA BASE")
+    caminho_relatorio = servico_fine_tuning.realizar_inferencia_base(
+        identificadores_exemplos
+    )
+
+    print(f"Relatorio de inferencia base gerado em: {caminho_relatorio}")
+    print("ETAPA 6 CONCLUIDA")
+    print("*" * 50)
+    return caminho_relatorio
+
+
 def main() -> None:
     caminho_arquivo_auditoria = Path("app/data/processado/dados_medicos_auditoria.xlsx")
 
     servico_arquivos = ArquivoService()
     servico_qualidade = QualidadeService()
     servico_pii = PiiService()
+    servico_fine_tuning = FineTuningService(servico_arquivos)
     dataframe_original = None
     dataframe_auditoria = None
+    dataframe_fine_tuning = None
 
     opcoes_menu = {
         "0": "Executar todas as etapas",
@@ -177,8 +218,9 @@ def main() -> None:
         "2": "Identificar registros repetidos e colunas ausentes",
         "3": "Tratar inconsistências encontradas",
         "4": "Identificar e tratar PII",
-        "5": "Executar Fine Tunning",
-        "6": "Sair",
+        "5": "Preparar dataframe para Fine Tuning",
+        "6": "Executar inferencia base",
+        "7": "Sair",
     }
 
     while True:
@@ -187,7 +229,7 @@ def main() -> None:
         # Mantém o menu ativo até que o usuário informe uma opção válida.
         opcao_escolhida = input("Informe a opcao desejada: ").strip()
 
-        if opcao_escolhida == "6":
+        if opcao_escolhida == "7":
             print("Encerrando o programa.")
             break
 
@@ -221,6 +263,12 @@ def main() -> None:
                 dataframe_auditoria,
                 caminho_arquivo_auditoria,
             )
+
+            # Etapa 5 - Preparacao do dataframe para fine-tuning
+            dataframe_fine_tuning = executar_etapa_5(servico_fine_tuning)
+
+            # Etapa 6 - Inferencia com o modelo antes do fine-tuning
+            executar_etapa_6(servico_fine_tuning)
 
         if opcao_escolhida == "1":
             dataframe_original = executar_etapa_1(servico_arquivos)
@@ -263,7 +311,11 @@ def main() -> None:
 
       
         if opcao_escolhida == "5":
-            print("A etapa de fine tuning ainda não foi implementada.")
+            dataframe_fine_tuning = executar_etapa_5(servico_fine_tuning)
+            continue
+
+        if opcao_escolhida == "6":
+            executar_etapa_6(servico_fine_tuning)
             continue
 
 
