@@ -30,6 +30,12 @@ COLUNAS_ANALISADAS_PII: tuple[str, ...] = (
 
 )
 
+# Configuracao centralizada da etapa 8 para facilitar novos experimentos.
+LIMITE_REGISTROS_FINE_TUNING = None
+QUANTIDADE_EPOCAS_FINE_TUNING = 3
+RANK_LORA_FINE_TUNING = 16
+MAX_TOKENS_ENTRADA_FINE_TUNING = 512
+
 
 def exibir_menu(opcoes_menu: dict[str, str]) -> None:
     print("\nMenu principal")
@@ -37,27 +43,36 @@ def exibir_menu(opcoes_menu: dict[str, str]) -> None:
         print(f"{numero_opcao} - {descricao_opcao}")
 
 
-def executar_etapa_1(servico_arquivos: ArquivoService, caminho_arquivo: Path) -> pd.DataFrame:
+def executar_etapa_2(
+    servico_arquivos: ArquivoService,
+    caminho_arquivo: Path,
+    percentual_registros: float,
+) -> pd.DataFrame:
 
-    print (f"INICIANDO A ETAPA 1 - LEITURA DO ARQUIVO EXCEL: {caminho_arquivo}")
+    print (f"INICIANDO A ETAPA 2 - LEITURA DO ARQUIVO EXCEL: {caminho_arquivo}")
+    print(f"Percentual de registros utilizado: {percentual_registros:.2f}%")
 
-    dataframe_original = servico_arquivos.gerar_dataframe(caminho_arquivo)
+    dataframe_original = servico_arquivos.gerar_dataframe(
+        caminho_arquivo,
+        percentual_registros=percentual_registros,
+        quantidade_minima=3,
+    )
     print(
         "Dataframe gerado com sucesso: "
         f"{dataframe_original.shape[0]} linhas e "
         f"{dataframe_original.shape[1]} colunas."
     )
-    print ("ETAPA 1 CONCLUÍDA")
+    print ("ETAPA 2 CONCLUÍDA")
     print ("*" * 50)
     return dataframe_original
 
 
-def executar_etapa_2(
+def executar_etapa_3(
     servico_qualidade: QualidadeService,
     dataframe_original   
 ) -> None:
 
-    print(f"INICIANDO A ETAPA 2 - VERIFICAÇÃO REGISTROS REPETIDOS E COLUNAS AUSENTES")
+    print(f"INICIANDO A ETAPA 3 - VERIFICAÇÃO REGISTROS REPETIDOS E COLUNAS AUSENTES")
             
     caminho_rel_repetidos = servico_qualidade.analisar_registros_repetidos(
         dataframe_original,
@@ -70,17 +85,21 @@ def executar_etapa_2(
 
     print(f"Relatório de registros repetidos: {caminho_rel_repetidos}")
     print(f"Relatório de registros com colunas ausentes: {caminho_rel_ausentes}")
-    print(f"ETAPA 2 CONCLUÍDA")
+    print(f"ETAPA 3 CONCLUÍDA")
     print ("*" * 50)
 
-def executar_etapa_3(
+def executar_etapa_4(
     servico_qualidade: QualidadeService,
     dataframe_original,
     caminho_arquivo_tratado: Path,
     caminho_relatorio_repetidos_depois: Path,
     caminho_relatorio_ausentes_depois: Path,
 ):
-    print(f"INICIANDO A ETAPA 3 - REMOVER REGISTROS REPETIDOS E COM COLUNAS AUSENTES")    
+    data_hora_inicio = datetime.now()
+    inicio_execucao = perf_counter()
+
+    print(f"INICIANDO A ETAPA 4 - REMOVER REGISTROS REPETIDOS E COM COLUNAS AUSENTES")
+    print(f"Data e hora de início: {data_hora_inicio:%d/%m/%Y %H:%M}")
 
     resultado_tratamento_repetidos = servico_qualidade.remover_registros_repetidos(
         dataframe_original,
@@ -121,13 +140,17 @@ def executar_etapa_3(
         f"{resultado_tratamento_ausentes.caminho_arquivo_tratado}"
     )
 
-    print ("ETAPA 3 CONCLUÍDA")
+    data_hora_termino = datetime.now()
+    duracao_minutos = (perf_counter() - inicio_execucao) / 60
+    print(f"Data e hora de término: {data_hora_termino:%d/%m/%Y %H:%M}")
+    print(f"Duração da execução: {duracao_minutos:.2f} minutos")
+    print ("ETAPA 4 CONCLUÍDA")
     print ("*" * 50)
 
     return dataframe_auditoria
 
 
-def executar_etapa_4(
+def executar_etapa_5(
     servico_pii: PiiService,
     dataframe_tratado,
     caminho_arquivo_tratado: Path,
@@ -136,15 +159,16 @@ def executar_etapa_4(
     data_hora_inicio = datetime.now()
     inicio_execucao = perf_counter()
 
-    print("INICIANDO A ETAPA 4 - IDENTIFICAÇÃO E TRATAMENTO DE PII")
-    print(f"Data e hora de início: {data_hora_inicio:%d/%m/%Y %H:%M:%S}")
+    print("INICIANDO A ETAPA 5 - IDENTIFICAÇÃO E TRATAMENTO DE PII")
+    print(f"Data e hora de início: {data_hora_inicio:%d/%m/%Y %H:%M}")
 
     # Executa o fluxo de identificação e futuro tratamento das PII.
     resultado_pii = servico_pii.identificar_e_tratar_pii(
         dataframe=dataframe_tratado,
         colunas_analisar=list(COLUNAS_ANALISADAS_PII),
         caminho_arquivo_tratado=caminho_arquivo_tratado,
-        percentual_dataframe=100,
+        # Processa integralmente o subconjunto escolhido na leitura inicial.
+        percentual_dataframe=100.0,
     )
 
     print(
@@ -152,22 +176,20 @@ def executar_etapa_4(
         f"{resultado_pii.caminho_arquivo_tratado}"
     )
     # Calcula e apresenta o tempo total depois que o processamento termina.
-    duracao_execucao = perf_counter() - inicio_execucao
-    minutos, segundos = divmod(duracao_execucao, 60)
-    print(
-        f"Tempo de execução: {int(minutos)} minutos e "
-        f"{segundos:.2f} segundos"
-    )
-    print("ETAPA 4 CONCLUÍDA")
+    data_hora_termino = datetime.now()
+    duracao_minutos = (perf_counter() - inicio_execucao) / 60
+    print(f"Data e hora de término: {data_hora_termino:%d/%m/%Y %H:%M}")
+    print(f"Duração da execução: {duracao_minutos:.2f} minutos")
+    print("ETAPA 5 CONCLUÍDA")
     print("*" * 50)
 
     return resultado_pii.dataframe_resultado
 
 
-def executar_etapa_5(
+def executar_etapa_6(
     servico_fine_tuning: FineTuningService,
 ) -> pd.DataFrame:
-    print("INICIANDO A ETAPA 5 - PREPARACAO DO DATAFRAME PARA FINE-TUNING")
+    print("INICIANDO A ETAPA 6 - PREPARACAO DO DATAFRAME PARA FINE-TUNING")
 
     dataframe_fine_tuning = servico_fine_tuning.gerar_dataframe_fine_tuning()
 
@@ -180,47 +202,150 @@ def executar_etapa_5(
         "Arquivo Excel gerado em: "
         f"{servico_fine_tuning.CAMINHO_ARQUIVO_FINE_TUNING}"
     )
-    print("ETAPA 5 CONCLUIDA")
+    print("ETAPA 6 CONCLUIDA")
     print("*" * 50)
 
     return dataframe_fine_tuning
 
 
-def executar_etapa_6(servico_fine_tuning: FineTuningService) -> Path:
-    """Executa a inferencia-base nos exemplos definidos para comparacao."""
-    identificadores_exemplos = {2, 3, 6}
+def executar_etapa_7(servico_fine_tuning: FineTuningService) -> Path:
+    """Executa a inferencia-base nos registros reservados para teste."""
+    data_hora_inicio = datetime.now()
+    inicio_execucao = perf_counter()
 
-    print("INICIANDO A ETAPA 6 - INFERENCIA BASE")
-    caminho_relatorio = servico_fine_tuning.realizar_inferencia_base(
-        identificadores_exemplos
-    )
+    print("INICIANDO A ETAPA 7 - INFERENCIA BASE")
+    print(f"Data e hora de início: {data_hora_inicio:%d/%m/%Y %H:%M}")
+    caminho_relatorio = servico_fine_tuning.realizar_inferencia_base()
 
     print(f"Relatorio de inferencia base gerado em: {caminho_relatorio}")
-    print("ETAPA 6 CONCLUIDA")
+    data_hora_termino = datetime.now()
+    duracao_minutos = (perf_counter() - inicio_execucao) / 60
+    print(f"Data e hora de término: {data_hora_termino:%d/%m/%Y %H:%M}")
+    print(f"Duração da execução: {duracao_minutos:.2f} minutos")
+    print("ETAPA 7 CONCLUIDA")
     print("*" * 50)
     return caminho_relatorio
 
 
-def main() -> None:
+def executar_etapa_8(servico_fine_tuning: FineTuningService) -> Path:
+    """Executa o fine-tuning supervisionado com adaptador LoRA."""
+    data_hora_inicio = datetime.now()
+    inicio_execucao = perf_counter()
+
+    print("INICIANDO A ETAPA 8 - FINE-TUNING COM LORA")
+    print(f"Data e hora de início: {data_hora_inicio:%d/%m/%Y %H:%M}")
+    print("O treinamento sera executado em CPU e pode ser demorado.")
+    print(
+        "Configuracao: "
+        f"registros={servico_fine_tuning.limite_registros_fine_tuning}, "
+        f"epocas={servico_fine_tuning.quantidade_epocas_fine_tuning}, "
+        f"max_tokens={servico_fine_tuning.max_tokens_entrada}, "
+        f"lora_r={servico_fine_tuning.rank_lora}."
+    )
+
+    caminho_modelo = servico_fine_tuning.realizar_fine_tuning()
+
+    print(f"Adaptador LoRA salvo em: {caminho_modelo}")
+    print(
+        "Metricas do fine-tuning salvas em: "
+        f"{servico_fine_tuning.CAMINHO_RELATORIO_METRICAS}"
+    )
+    print(
+        "Relatorio tecnico do fine-tuning salvo em: "
+        f"{servico_fine_tuning.CAMINHO_RELATORIO_TECNICO}"
+    )
+    data_hora_termino = datetime.now()
+    duracao_minutos = (perf_counter() - inicio_execucao) / 60
+    print(f"Data e hora de término: {data_hora_termino:%d/%m/%Y %H:%M}")
+    print(f"Duração da execução: {duracao_minutos:.2f} minutos")
+    print("ETAPA 8 CONCLUIDA")
+    print("*" * 50)
+    return caminho_modelo
+
+
+def executar_etapa_9(servico_fine_tuning: FineTuningService) -> Path:
+    """Executa a inferencia com o adaptador LoRA treinado."""
+    data_hora_inicio = datetime.now()
+    inicio_execucao = perf_counter()
+
+    print("INICIANDO A ETAPA 9 - INFERENCIA APOS FINE-TUNING")
+    print(f"Data e hora de início: {data_hora_inicio:%d/%m/%Y %H:%M}")
+
+    caminho_relatorio = servico_fine_tuning.realizar_inferencia_fine_tuning()
+
+    print(f"Relatorio da inferencia ajustada gerado em: {caminho_relatorio}")
+    data_hora_termino = datetime.now()
+    duracao_minutos = (perf_counter() - inicio_execucao) / 60
+    print(f"Data e hora de término: {data_hora_termino:%d/%m/%Y %H:%M}")
+    print(f"Duração da execução: {duracao_minutos:.2f} minutos")
+    print("ETAPA 9 CONCLUIDA")
+    print("*" * 50)
+    return caminho_relatorio
+
+
+def executar_etapa_10(servico_fine_tuning: FineTuningService) -> Path:
+    """Gera o relatorio comparativo das inferencias do split de teste."""
+    print("INICIANDO A ETAPA 10 - COMPARACAO DAS INFERENCIAS")
+
+    caminho_relatorio = servico_fine_tuning.comparar_inferencias()
+
+    print(f"Relatorio comparativo gerado em: {caminho_relatorio}")
+    print("ETAPA 10 CONCLUIDA")
+    print("*" * 50)
+    return caminho_relatorio
+
+
+def solicitar_percentual_registros() -> float:
+    """Solicita uma única vez o percentual usado em toda a execução."""
+    while True:
+        valor_informado = input(
+            "Informe o percentual de registros que será utilizado (0 a 100): "
+        ).strip()
+        try:
+            return ArquivoService.validar_percentual_registros(
+                valor_informado.replace(",", ".")
+            )
+        except ValueError as erro:
+            print(f"Percentual inválido: {erro}")
+
+
+def main(percentual_registros: float | None = None) -> None:
+    if percentual_registros is None:
+        percentual_registros = solicitar_percentual_registros()
+    else:
+        percentual_registros = ArquivoService.validar_percentual_registros(
+            percentual_registros
+        )
+
     caminho_arquivo_auditoria = Path("app/data/processado/dados_medicos_auditoria.xlsx")
 
     servico_arquivos = ArquivoService()
-    servico_qualidade = QualidadeService()
-    servico_pii = PiiService()
-    servico_fine_tuning = FineTuningService(servico_arquivos)
+    servico_qualidade = QualidadeService(servico_arquivo=servico_arquivos)
+    servico_pii = PiiService(servico_arquivo=servico_arquivos)
+    servico_fine_tuning = FineTuningService(
+        servico_arquivo=servico_arquivos,
+        limite_registros_fine_tuning=LIMITE_REGISTROS_FINE_TUNING,
+        quantidade_epocas_fine_tuning=QUANTIDADE_EPOCAS_FINE_TUNING,
+        rank_lora=RANK_LORA_FINE_TUNING,
+        max_tokens_entrada=MAX_TOKENS_ENTRADA_FINE_TUNING,
+    )
     dataframe_original = None
     dataframe_auditoria = None
     dataframe_fine_tuning = None
 
     opcoes_menu = {
-        "0": "Executar todas as etapas",
-        "1": "Ler arquivo excel e gerar dataframe",
-        "2": "Identificar registros repetidos e colunas ausentes",
-        "3": "Tratar inconsistências encontradas",
-        "4": "Identificar e tratar PII",
-        "5": "Preparar dataframe para Fine Tuning",
-        "6": "Executar inferencia base",
-        "7": "Sair",
+        "0": "Executar opções 2 a 6",
+        "1": "Executar opções 7 a 10",
+        "2": "Ler arquivo excel e gerar dataframe",
+        "3": "Identificar registros repetidos e colunas ausentes",
+        "4": "Tratar inconsistências encontradas",
+        "5": "Identificar e tratar PII",
+        "6": "Preparar dataframe para Fine Tuning",
+        "7": "Executar inferencia base",
+        "8": "Executar fine-tuning com LoRA",
+        "9": "Executar inferencia apos fine-tuning",
+        "10": "Comparar inferencias",
+        "11": "Sair",
     }
 
     while True:
@@ -229,7 +354,7 @@ def main() -> None:
         # Mantém o menu ativo até que o usuário informe uma opção válida.
         opcao_escolhida = input("Informe a opcao desejada: ").strip()
 
-        if opcao_escolhida == "7":
+        if opcao_escolhida == "11":
             print("Encerrando o programa.")
             break
 
@@ -241,81 +366,127 @@ def main() -> None:
 
         if opcao_escolhida == "0":
 
-            # Etapa 1 - Leitura do arquivo Excel e geração do dataframe
-            dataframe_original = executar_etapa_1(servico_arquivos,Path("app/data/original/dados_medicos_base.xlsx")) 
+            # Etapa 2 - Leitura do arquivo Excel e geração do dataframe
+            dataframe_original = executar_etapa_2(
+                servico_arquivos,
+                Path("app/data/original/dados_medicos_base.xlsx"),
+                percentual_registros,
+            )
 
-            # Etapa 2 - Identificação de registros repetidos e colunas ausentes
-            executar_etapa_2( servico_qualidade, dataframe_original)
+            # Etapa 3 - Identificação de registros repetidos e colunas ausentes
+            executar_etapa_3(servico_qualidade, dataframe_original)
           
-            # Etapa 3 - Tratamento de registros repetidos e colunas ausentes
-            dataframe_auditoria = executar_etapa_3(
+            # Etapa 4 - Tratamento de registros repetidos e colunas ausentes
+            dataframe_auditoria = executar_etapa_4(
                 servico_qualidade,
                 dataframe_original,
                 caminho_arquivo_auditoria,
                 Path("app/data/relatorios/registros_repetidos_depois.txt"),
-                Path("app/data/relatorios/registros_com_colunas_ausentes_depois.txt")
-   
+                Path("app/data/relatorios/registros_com_colunas_ausentes_depois.txt"),
             )
 
-            # Etapa 4 - Identificação e tratamento de PII
-            dataframe_auditoria = executar_etapa_4(
+            # Etapa 5 - Identificação e tratamento de PII
+            dataframe_auditoria = executar_etapa_5(
                 servico_pii,
                 dataframe_auditoria,
                 caminho_arquivo_auditoria,
             )
 
-            # Etapa 5 - Preparacao do dataframe para fine-tuning
-            dataframe_fine_tuning = executar_etapa_5(servico_fine_tuning)
+            # Etapa 6 - Preparacao do dataframe para fine-tuning
+            try:
+                dataframe_fine_tuning = executar_etapa_6(servico_fine_tuning)
+            except ValueError as erro:
+                dataframe_fine_tuning = None
+                print(f"Não foi possível executar a etapa 6: {erro}")
 
-            # Etapa 6 - Inferencia com o modelo antes do fine-tuning
-            executar_etapa_6(servico_fine_tuning)
+            continue
 
         if opcao_escolhida == "1":
-            dataframe_original = executar_etapa_1(servico_arquivos)
-           
+            # Etapa 7 - Inferencia com o modelo antes do fine-tuning
+            executar_etapa_7(servico_fine_tuning)
+
+            # Etapa 8 - Fine-tuning com LoRA
+            executar_etapa_8(servico_fine_tuning)
+
+            # Etapa 9 - Inferencia com o modelo ajustado
+            executar_etapa_9(servico_fine_tuning)
+
+            # Etapa 10 - Comparacao das inferencias
+            executar_etapa_10(servico_fine_tuning)
+
             continue
 
         if opcao_escolhida == "2":
-            if dataframe_original is None:
-                print("Carregue o dataframe na opção 1 antes de executar a qualidade.")
-                continue
-
-            executar_etapa_2( servico_qualidade, dataframe_original)
+            dataframe_original = executar_etapa_2(
+                servico_arquivos,
+                Path("app/data/original/dados_medicos_base.xlsx"),
+                percentual_registros,
+            )
             continue
 
         if opcao_escolhida == "3":
             if dataframe_original is None:
-                print("Carregue o dataframe na opção 1 antes de tratar inconsistências.")
+                print("Carregue o dataframe na opção 2 antes de executar a qualidade.")
                 continue
 
-            dataframe_auditoria = executar_etapa_3(
-                            servico_qualidade,
-                            dataframe_original,
-                            caminho_arquivo_auditoria,
-                            Path("app/data/relatorios/registros_repetidos_depois.txt"),
-                            Path("app/data/relatorios/registros_com_colunas_ausentes_depois.txt")
-            )                
+            executar_etapa_3(servico_qualidade, dataframe_original)
             continue
 
         if opcao_escolhida == "4":
-            if dataframe_auditoria is None:
-                print("Execute a opção 3 antes de identificar e tratar PII.")
+            if dataframe_original is None:
+                print("Carregue o dataframe na opção 2 antes de tratar inconsistências.")
                 continue
 
             dataframe_auditoria = executar_etapa_4(
+                servico_qualidade,
+                dataframe_original,
+                caminho_arquivo_auditoria,
+                Path("app/data/relatorios/registros_repetidos_depois.txt"),
+                Path("app/data/relatorios/registros_com_colunas_ausentes_depois.txt"),
+            )
+            continue
+
+        if opcao_escolhida == "5":
+            if dataframe_auditoria is None:
+                print("Execute a opção 4 antes de identificar e tratar PII.")
+                continue
+
+            dataframe_auditoria = executar_etapa_5(
                 servico_pii,
                 dataframe_auditoria,
                 caminho_arquivo_auditoria,
             )
             continue
 
-      
-        if opcao_escolhida == "5":
-            dataframe_fine_tuning = executar_etapa_5(servico_fine_tuning)
+        if opcao_escolhida == "6":
+            if dataframe_auditoria is None:
+                print(
+                    "Execute as opções 2 a 5 nesta execução antes de preparar "
+                    "o dataframe de fine-tuning."
+                )
+                continue
+
+            try:
+                dataframe_fine_tuning = executar_etapa_6(servico_fine_tuning)
+            except ValueError as erro:
+                dataframe_fine_tuning = None
+                print(f"Não foi possível executar a etapa 6: {erro}")
             continue
 
-        if opcao_escolhida == "6":
-            executar_etapa_6(servico_fine_tuning)
+        if opcao_escolhida == "7":
+            executar_etapa_7(servico_fine_tuning)
+            continue
+
+        if opcao_escolhida == "8":
+            executar_etapa_8(servico_fine_tuning)
+            continue
+
+        if opcao_escolhida == "9":
+            executar_etapa_9(servico_fine_tuning)
+            continue
+
+        if opcao_escolhida == "10":
+            executar_etapa_10(servico_fine_tuning)
             continue
 
 

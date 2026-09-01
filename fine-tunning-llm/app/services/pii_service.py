@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from math import ceil
 from pathlib import Path
 
 import pandas as pd
@@ -258,20 +257,15 @@ class PiiService:
         percentual_dataframe: float = 100.0,
     ) -> ResultadoIdentificacaoPii:
         """Identifica PII nas colunas informadas e atualiza o arquivo Excel."""
-        # Garante que o percentual represente uma parcela valida do dataframe.
-        if not 0 < percentual_dataframe <= 100:
-            raise ValueError("O percentual do dataframe deve estar entre 0 e 100.")
-
         # Inclui as colunas de resultado no dataframe recebido.
         dataframe_resultado = dataframe
         dataframe_resultado["entidades identificadas"] = ""
         dataframe_resultado["possui_pii"] = ""
 
-        # Arredonda para cima para analisar ao menos um registro de dataframes nao vazios.
-        quantidade_registros = ceil(
-            len(dataframe_resultado) * percentual_dataframe / 100
+        registros_analisar = self.servico_arquivo.selecionar_percentual_registros(
+            dataframe_resultado,
+            percentual_dataframe,
         )
-        registros_analisar = dataframe_resultado.iloc[:quantidade_registros]
 
         for indice, registro in registros_analisar.iterrows():
             entidades_identificadas: list[str] = []

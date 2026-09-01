@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from math import ceil
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -9,12 +10,69 @@ import pandas as pd
 class ArquivoService:
     """Centraliza a leitura e a gravação de arquivos Excel do pipeline."""
 
-    def gerar_dataframe(self, caminho_arquivo: Path) -> pd.DataFrame:
-        """Lê um arquivo Excel e retorna seu conteúdo em um dataframe."""
+    def gerar_dataframe(
+        self,
+        caminho_arquivo: Path,
+        percentual_registros: float = 100.0,
+        quantidade_minima: int = 0,
+    ) -> pd.DataFrame:
+        """Lê um Excel e retorna o percentual solicitado dos registros."""
         if not caminho_arquivo.exists():
             raise FileNotFoundError(f"Arquivo não encontrado: {caminho_arquivo}")
 
-        return pd.read_excel(caminho_arquivo)
+        dataframe = pd.read_excel(caminho_arquivo)
+        return self.selecionar_percentual_registros(
+            dataframe,
+            percentual_registros,
+            quantidade_minima,
+        )
+
+    @staticmethod
+    def selecionar_percentual_registros(
+        dataframe: pd.DataFrame,
+        percentual_registros: float,
+        quantidade_minima: int = 0,
+    ) -> pd.DataFrame:
+        """Seleciona o percentual inicial do dataframe, preservando sua ordem."""
+        if (
+            isinstance(quantidade_minima, bool)
+            or not isinstance(quantidade_minima, int)
+            or quantidade_minima < 0
+        ):
+            raise ValueError(
+                "A quantidade mínima de registros deve ser um inteiro "
+                "maior ou igual a zero."
+            )
+
+        percentual_validado = ArquivoService.validar_percentual_registros(
+            percentual_registros
+        )
+        quantidade_registros = ceil(
+            len(dataframe) * percentual_validado / 100
+        )
+        quantidade_registros = min(
+            len(dataframe),
+            max(quantidade_registros, quantidade_minima),
+        )
+        return dataframe.iloc[:quantidade_registros].copy()
+
+    @staticmethod
+    def validar_percentual_registros(percentual_registros: float) -> float:
+        """Valida e normaliza um percentual entre zero e cem."""
+        if isinstance(percentual_registros, bool):
+            raise ValueError("O percentual de registros deve estar entre 0 e 100.")
+
+        try:
+            percentual_validado = float(percentual_registros)
+        except (TypeError, ValueError) as erro:
+            raise ValueError(
+                "O percentual de registros deve ser um número entre 0 e 100."
+            ) from erro
+
+        if not 0 < percentual_validado <= 100:
+            raise ValueError("O percentual de registros deve estar entre 0 e 100.")
+
+        return percentual_validado
 
     def criar_excel(self, dataframe: pd.DataFrame, caminho_arquivo: Path) -> Path:
         """Cria um arquivo Excel a partir de um dataframe e retorna seu caminho."""

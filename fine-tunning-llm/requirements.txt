@@ -8,6 +8,7 @@ langchain-openai>=0.1.22
 langgraph>=0.2.35
 scikit-learn>=1.5.1
 datasets>=4.7.0
+huggingface-hub>=0.34.0
 transformers>=4.56.2
 accelerate>=1.4.0
 peft>=0.20.0
