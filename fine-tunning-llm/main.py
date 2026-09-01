@@ -3,8 +3,13 @@ from pathlib import Path
 from time import perf_counter
 
 import pandas as pd
-from app.services.arquivo_service import ArquivoService
+from rich import box
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
 
+from app.services.arquivo_service import ArquivoService
 from app.services.fine_tuning_service import FineTuningService
 from app.services.pii_service import PiiService
 from app.services.qualidade_service import QualidadeService
@@ -36,11 +41,137 @@ QUANTIDADE_EPOCAS_FINE_TUNING = 3
 RANK_LORA_FINE_TUNING = 16
 MAX_TOKENS_ENTRADA_FINE_TUNING = 512
 
+CONSOLE = Console()
 
-def exibir_menu(opcoes_menu: dict[str, str]) -> None:
-    print("\nMenu principal")
-    for numero_opcao, descricao_opcao in opcoes_menu.items():
-        print(f"{numero_opcao} - {descricao_opcao}")
+
+def obter_icone(emoji: str, alternativa: str) -> str:
+    """Usa emoji somente quando a codificação do terminal oferece suporte."""
+    try:
+        emoji.encode(CONSOLE.encoding)
+    except (LookupError, UnicodeEncodeError):
+        return alternativa
+    return emoji
+
+
+GRUPOS_MENU: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    (f"{obter_icone('⚡', '>>')} FLUXOS COMPLETOS", "bright_cyan", ("0", "1")),
+    (
+        f"{obter_icone('🧹', '--')} PREPARAÇÃO DOS DADOS",
+        "bright_blue",
+        ("2", "3", "4", "5", "6"),
+    ),
+    (
+        f"{obter_icone('🧠', '**')} MODELO E AVALIAÇÃO",
+        "bright_magenta",
+        ("7", "8", "9", "10"),
+    ),
+    (f"{obter_icone('⚙', '--')} SISTEMA", "bright_black", ("11",)),
+)
+
+ICONES_MENU: dict[str, str] = {
+    "0": obter_icone("🚀", ">>"),
+    "1": obter_icone("🔬", "::"),
+    "2": obter_icone("📂", "+"),
+    "3": obter_icone("🔎", "?"),
+    "4": obter_icone("🧽", "~"),
+    "5": obter_icone("🔐", "#"),
+    "6": obter_icone("🧩", "+"),
+    "7": obter_icone("💬", ">"),
+    "8": obter_icone("🛠", "*"),
+    "9": obter_icone("✨", "*"),
+    "10": obter_icone("📊", "%"),
+    "11": obter_icone("👋", "<"),
+}
+
+
+def exibir_menu(
+    opcoes_menu: dict[str, str],
+    percentual_registros: float,
+    dataframe_original_carregado: bool,
+    dataframe_auditoria_carregado: bool,
+    dataframe_fine_tuning_carregado: bool,
+) -> None:
+    """Exibe as opções do pipeline agrupadas e o estado da sessão atual."""
+    titulo = Text(
+        f"{obter_icone('🩺', '+')}  PIPELINE DE FINE-TUNING DE LLM",
+        style="bold bright_white",
+    )
+    subtitulo = Text(
+        "Dados médicos  •  Qwen3-0.6B  •  LoRA",
+        style="cyan",
+    )
+    cabecalho = Text.assemble(titulo, "\n", subtitulo)
+    CONSOLE.print()
+    CONSOLE.print(
+        Panel(
+            cabecalho,
+            border_style="bright_cyan",
+            padding=(1, 3),
+        )
+    )
+
+    tabela = Table(
+        box=box.ROUNDED,
+        border_style="bright_black",
+        header_style="bold bright_white on dark_cyan",
+        show_lines=False,
+        expand=True,
+    )
+    tabela.add_column("Opção", justify="center", width=7, no_wrap=True)
+    tabela.add_column("Ação", ratio=4)
+    tabela.add_column("Estado", ratio=2, no_wrap=True)
+
+    estados = {
+        "0": "[cyan]fluxo completo[/cyan]",
+        "1": "[magenta]fluxo completo[/magenta]",
+        "2": "[green]disponível[/green]",
+        "3": (
+            "[green]disponível[/green]"
+            if dataframe_original_carregado
+            else "[yellow]requer etapa 2[/yellow]"
+        ),
+        "4": (
+            "[green]disponível[/green]"
+            if dataframe_original_carregado
+            else "[yellow]requer etapa 2[/yellow]"
+        ),
+        "5": (
+            "[green]disponível[/green]"
+            if dataframe_auditoria_carregado
+            else "[yellow]requer etapa 4[/yellow]"
+        ),
+        "6": (
+            "[green]concluída[/green]"
+            if dataframe_fine_tuning_carregado
+            else (
+                "[green]disponível[/green]"
+                if dataframe_auditoria_carregado
+                else "[yellow]requer etapa 4[/yellow]"
+            )
+        ),
+        "7": "[blue]sob demanda[/blue]",
+        "8": "[blue]sob demanda[/blue]",
+        "9": "[blue]sob demanda[/blue]",
+        "10": "[blue]sob demanda[/blue]",
+        "11": "[bright_black]encerrar[/bright_black]",
+    }
+
+    for indice_grupo, (nome_grupo, cor_grupo, opcoes_grupo) in enumerate(GRUPOS_MENU):
+        if indice_grupo:
+            tabela.add_section()
+        tabela.add_row("", f"[bold {cor_grupo}]{nome_grupo}[/]", "")
+        for numero_opcao in opcoes_grupo:
+            tabela.add_row(
+                f"[bold {cor_grupo}][ {numero_opcao} ][/]",
+                f"{ICONES_MENU[numero_opcao]}  {opcoes_menu[numero_opcao]}",
+                estados[numero_opcao],
+            )
+
+    CONSOLE.print(tabela)
+    CONSOLE.print(
+        f"[bright_black]Amostra configurada:[/bright_black] "
+        f"[bold cyan]{percentual_registros:.2f}%[/bold cyan] dos registros\n"
+    )
 
 
 def executar_etapa_2(
@@ -181,7 +312,7 @@ def executar_etapa_5(
     print(f"Data e hora de término: {data_hora_termino:%d/%m/%Y %H:%M}")
     print(f"Duração da execução: {duracao_minutos:.2f} minutos")
     print("ETAPA 5 CONCLUÍDA")
-    print("*" * 50)
+    print("*" * 80)
 
     return resultado_pii.dataframe_resultado
 
@@ -203,7 +334,7 @@ def executar_etapa_6(
         f"{servico_fine_tuning.CAMINHO_ARQUIVO_FINE_TUNING}"
     )
     print("ETAPA 6 CONCLUIDA")
-    print("*" * 50)
+    print("*" * 80)
 
     return dataframe_fine_tuning
 
@@ -223,7 +354,7 @@ def executar_etapa_7(servico_fine_tuning: FineTuningService) -> Path:
     print(f"Data e hora de término: {data_hora_termino:%d/%m/%Y %H:%M}")
     print(f"Duração da execução: {duracao_minutos:.2f} minutos")
     print("ETAPA 7 CONCLUIDA")
-    print("*" * 50)
+    print("*" * 80)
     return caminho_relatorio
 
 
@@ -259,7 +390,7 @@ def executar_etapa_8(servico_fine_tuning: FineTuningService) -> Path:
     print(f"Data e hora de término: {data_hora_termino:%d/%m/%Y %H:%M}")
     print(f"Duração da execução: {duracao_minutos:.2f} minutos")
     print("ETAPA 8 CONCLUIDA")
-    print("*" * 50)
+    print("*" * 80)
     return caminho_modelo
 
 
@@ -279,7 +410,7 @@ def executar_etapa_9(servico_fine_tuning: FineTuningService) -> Path:
     print(f"Data e hora de término: {data_hora_termino:%d/%m/%Y %H:%M}")
     print(f"Duração da execução: {duracao_minutos:.2f} minutos")
     print("ETAPA 9 CONCLUIDA")
-    print("*" * 50)
+    print("*" * 80)
     return caminho_relatorio
 
 
@@ -291,22 +422,26 @@ def executar_etapa_10(servico_fine_tuning: FineTuningService) -> Path:
 
     print(f"Relatorio comparativo gerado em: {caminho_relatorio}")
     print("ETAPA 10 CONCLUIDA")
-    print("*" * 50)
+    print("*" * 80)
     return caminho_relatorio
 
 
 def solicitar_percentual_registros() -> float:
     """Solicita uma única vez o percentual usado em toda a execução."""
     while True:
-        valor_informado = input(
-            "Informe o percentual de registros que será utilizado (0 a 100): "
+        valor_informado = CONSOLE.input(
+            "[bold cyan]Informe o percentual de registros que será utilizado "
+            "(0 a 100): [/bold cyan]"
         ).strip()
         try:
             return ArquivoService.validar_percentual_registros(
                 valor_informado.replace(",", ".")
             )
         except ValueError as erro:
-            print(f"Percentual inválido: {erro}")
+            CONSOLE.print(
+                f"[bold red]{obter_icone('✖', 'X')} Percentual inválido:[/bold red] "
+                f"{erro}"
+            )
 
 
 def main(percentual_registros: float | None = None) -> None:
@@ -334,35 +469,53 @@ def main(percentual_registros: float | None = None) -> None:
     dataframe_fine_tuning = None
 
     opcoes_menu = {
-        "0": "Executar opções 2 a 6",
-        "1": "Executar opções 7 a 10",
-        "2": "Ler arquivo excel e gerar dataframe",
+        "0": "Preparar dados — executar etapas 2 a 6",
+        "1": "Treinar e avaliar — executar etapas 7 a 10",
+        "2": "Ler arquivo Excel e gerar dataframe",
         "3": "Identificar registros repetidos e colunas ausentes",
         "4": "Tratar inconsistências encontradas",
         "5": "Identificar e tratar PII",
-        "6": "Preparar dataframe para Fine Tuning",
-        "7": "Executar inferencia base",
+        "6": "Preparar dataframe para fine-tuning",
+        "7": "Executar inferência-base",
         "8": "Executar fine-tuning com LoRA",
-        "9": "Executar inferencia apos fine-tuning",
-        "10": "Comparar inferencias",
+        "9": "Executar inferência após fine-tuning",
+        "10": "Comparar inferências",
         "11": "Sair",
     }
 
     while True:
-        exibir_menu(opcoes_menu)
+        exibir_menu(
+            opcoes_menu=opcoes_menu,
+            percentual_registros=percentual_registros,
+            dataframe_original_carregado=dataframe_original is not None,
+            dataframe_auditoria_carregado=dataframe_auditoria is not None,
+            dataframe_fine_tuning_carregado=dataframe_fine_tuning is not None,
+        )
 
         # Mantém o menu ativo até que o usuário informe uma opção válida.
-        opcao_escolhida = input("Informe a opcao desejada: ").strip()
+        opcao_escolhida = CONSOLE.input(
+            f"[bold bright_cyan]{obter_icone('❯', '>')} Informe a opção desejada: "
+            "[/bold bright_cyan]"
+        ).strip()
 
         if opcao_escolhida == "11":
-            print("Encerrando o programa.")
+            CONSOLE.print(
+                f"\n[bold green]{obter_icone('👋', '<')} Programa encerrado. "
+                "Até a próxima![/bold green]"
+            )
             break
 
         if opcao_escolhida not in opcoes_menu:
-            print("Opcao invalida. Escolha uma das opcoes do menu.")
+            CONSOLE.print(
+                f"[bold red]{obter_icone('✖', 'X')} Opção inválida.[/bold red] "
+                "Escolha um dos números exibidos no menu."
+            )
             continue
 
-        print(f"Opcao selecionada: {opcoes_menu[opcao_escolhida]}")
+        CONSOLE.print(
+            f"\n[bold green]{obter_icone('▶', '>')} Opção selecionada:[/bold green] "
+            f"{ICONES_MENU[opcao_escolhida]} {opcoes_menu[opcao_escolhida]}\n"
+        )
 
         if opcao_escolhida == "0":
 
