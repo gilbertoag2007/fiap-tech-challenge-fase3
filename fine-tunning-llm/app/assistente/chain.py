@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.output_parsers import StrOutputParser
@@ -72,7 +73,13 @@ class AssistenteChain:
         if not resposta:
             raise ValueError("O modelo não retornou um rascunho clínico.")
         secoes_ausentes = [
-            secao for secao in SECOES_OBRIGATORIAS if f"{secao}:" not in resposta
+            secao
+            for secao in SECOES_OBRIGATORIAS
+            if not re.search(
+                rf"^[ \t]*{re.escape(secao)}[ \t]*:",
+                resposta,
+                flags=re.IGNORECASE | re.MULTILINE,
+            )
         ]
         if secoes_ausentes:
             raise ValueError("O rascunho não contém as seções obrigatórias.")
