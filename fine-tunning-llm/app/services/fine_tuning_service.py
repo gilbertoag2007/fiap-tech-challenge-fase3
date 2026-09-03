@@ -432,6 +432,20 @@ class FineTuningService:
             limite_registros=limite_registros,
         )
 
+    def gerar_resposta_modelo_ajustado(
+        self,
+        mensagem_system: str,
+        mensagem_usuario: str,
+        max_novos_tokens: int = 384,
+    ) -> str:
+        """Gera uma resposta usando o adaptador LoRA local já treinado."""
+        self._carregar_modelo_ajustado()
+        return self._gerar_resposta(
+            mensagem_system=mensagem_system,
+            mensagem_usuario=mensagem_usuario,
+            max_novos_tokens=max_novos_tokens,
+        )
+
     def comparar_inferencias(self) -> Path:
         """Compara as respostas base e ajustada com a resposta esperada."""
         dataframe_referencia = self._carregar_dataframe_fine_tuning_validado()
