@@ -20,6 +20,22 @@ COLUNAS_MONITORADAS: tuple[str, ...] = (
     "diagnostico_confirmado",
 )
 
+COLUNAS_RESUMO: tuple[str, ...] = (
+    "tipo_inconsistencia",
+    "quantidade_antes",
+    "registros_removidos",
+    "quantidade_depois",
+    "resultado",
+)
+
+COLUNAS_OCORRENCIAS: tuple[str, ...] = (
+    "momento",
+    "tipo_inconsistencia",
+    "linha_excel",
+    "id_registro",
+    "coluna",
+    "descricao",
+)
 
 
 @dataclass(frozen=True)
@@ -38,46 +54,99 @@ class QualidadeService:
         self.colunas_monitoradas = colunas
         self.servico_arquivo = servico_arquivo or ArquivoService()
 
-    def analisar_registros_repetidos(
+    def gerar_relatorio_qualidade(
         self,
-        dataframe: pd.DataFrame,
+        dataframe_antes: pd.DataFrame,
         caminho_relatorio: Path,
-    ) -> Path | None:
-        # Gera o relatório apenas quando houver pelo menos um registro repetido.
-        linhas_repetidas = dataframe.index[dataframe.duplicated(keep=False)]
-        conteudo = (
-            "\n".join(f"Linha {indice + 2}" for indice in linhas_repetidas)
-            if len(linhas_repetidas) > 0
-            else "Registros repetidos não encontrados."
+        dataframe_depois: pd.DataFrame | None = None,
+        registros_repetidos_removidos: int = 0,
+        registros_ausentes_removidos: int = 0,
+    ) -> Path:
+        """Consolida o resumo e as ocorrências de qualidade em um Excel."""
+        ocorrencias_antes = self._coletar_ocorrencias(
+            dataframe_antes,
+            momento="Antes",
         )
-        return self.servico_arquivo.criar_arquivo_txt(
-            "Linhas repetidas identificadas:",
-            conteudo,
-            caminho_relatorio,
+        ocorrencias_depois = (
+            self._coletar_ocorrencias(dataframe_depois, momento="Depois")
+            if dataframe_depois is not None
+            else []
+        )
+        ocorrencias = pd.DataFrame(
+            [*ocorrencias_antes, *ocorrencias_depois],
+            columns=COLUNAS_OCORRENCIAS,
         )
 
-    def analisar_registros_com_colunas_ausentes(
-        self,
-        dataframe: pd.DataFrame,
-        caminho_relatorio: Path,
-    ) -> Path | None:
-        # Gera o relatório apenas quando houver registros com colunas ausentes.
-        linhas_ausentes = self._coletar_valores_ausentes(dataframe)
-        conteudo = (
-            "\n".join(linhas_ausentes)
-            if linhas_ausentes
-            else "Registros com colunas ausentes não encontrados."
+        def contar_ocorrencias(
+            registros: list[dict[str, object]],
+            repetidos: bool,
+        ) -> int:
+            if repetidos:
+                return sum(
+                    registro["tipo_inconsistencia"] == "Registro repetido"
+                    for registro in registros
+                )
+            return sum(
+                registro["tipo_inconsistencia"] != "Registro repetido"
+                for registro in registros
+            )
+
+        configuracoes = (
+            (
+                "Registros repetidos",
+                contar_ocorrencias(ocorrencias_antes, repetidos=True),
+                contar_ocorrencias(ocorrencias_depois, repetidos=True),
+                registros_repetidos_removidos,
+            ),
+            (
+                "Valores ou colunas ausentes",
+                contar_ocorrencias(ocorrencias_antes, repetidos=False),
+                contar_ocorrencias(ocorrencias_depois, repetidos=False),
+                registros_ausentes_removidos,
+            ),
         )
-        return self.servico_arquivo.criar_arquivo_txt(
-            "Registros com colunas ausentes:",
-            conteudo,
+
+        resumo = []
+        tratamento_executado = dataframe_depois is not None
+        for tipo, quantidade_antes, quantidade_depois, removidos in configuracoes:
+            if not tratamento_executado:
+                resultado = (
+                    "Aguardando tratamento"
+                    if quantidade_antes
+                    else "Sem ocorrências"
+                )
+            elif quantidade_depois:
+                resultado = "Pendente"
+            else:
+                resultado = "Tratado" if quantidade_antes else "Sem ocorrências"
+
+            resumo.append(
+                {
+                    "tipo_inconsistencia": tipo,
+                    "quantidade_antes": quantidade_antes,
+                    "registros_removidos": (
+                        removidos if tratamento_executado else None
+                    ),
+                    "quantidade_depois": (
+                        quantidade_depois if tratamento_executado else None
+                    ),
+                    "resultado": resultado,
+                }
+            )
+
+        dataframe_resumo = pd.DataFrame(resumo, columns=COLUNAS_RESUMO)
+        return self.servico_arquivo.atualizar_excel_com_abas(
+            {
+                "resumo": dataframe_resumo,
+                "ocorrencias": ocorrencias,
+            },
             caminho_relatorio,
         )
 
     def remover_registros_repetidos(
         self,
         dataframe: pd.DataFrame,
-        caminho_arquivo_tratado: Path
+        caminho_arquivo_tratado: Path,
     ) -> TratamentoResult:
         """Remove registros repetidos, salva o resultado e retorna o resumo."""
         # Remove as duplicidades e reorganiza os índices do dataframe tratado.
@@ -98,7 +167,7 @@ class QualidadeService:
     def remover_registros_com_colunas_ausentes(
         self,
         dataframe: pd.DataFrame,
-        caminho_arquivo_tratado: Path 
+        caminho_arquivo_tratado: Path,
     ) -> TratamentoResult:
         """Remove registros com valores ausentes, salva o resultado e retorna o resumo."""
         # Identifica as linhas que possuem alguma coluna monitorada ausente.
@@ -129,29 +198,73 @@ class QualidadeService:
                 continue
 
             mascara_ausente = (
-                dataframe[nome_coluna].isna() | dataframe[nome_coluna].astype(str).str.strip().eq("")
+                dataframe[nome_coluna].isna()
+                | dataframe[nome_coluna].astype(str).str.strip().eq("")
             )
             indices_ausentes.update(dataframe.index[mascara_ausente].tolist())
 
         return indices_ausentes
 
-    def _coletar_valores_ausentes(self, dataframe: pd.DataFrame) -> list[str]:
-        linhas_ausentes: list[str] = []
+    def _coletar_ocorrencias(
+        self,
+        dataframe: pd.DataFrame,
+        momento: str,
+    ) -> list[dict[str, object]]:
+        """Estrutura duplicidades e ausências para o relatório consolidado."""
+        ocorrencias: list[dict[str, object]] = []
+
+        for indice in dataframe.index[dataframe.duplicated(keep=False)]:
+            identificador = (
+                dataframe.at[indice, "id"]
+                if "id" in dataframe.columns
+                and not pd.isna(dataframe.at[indice, "id"])
+                else ""
+            )
+            ocorrencias.append(
+                {
+                    "momento": momento,
+                    "tipo_inconsistencia": "Registro repetido",
+                    "linha_excel": indice + 2,
+                    "id_registro": identificador,
+                    "coluna": "",
+                    "descricao": "Registro duplicado considerando todas as colunas",
+                }
+            )
 
         for nome_coluna in self.colunas_monitoradas:
             if nome_coluna not in dataframe.columns:
-                linhas_ausentes.append(f"COLUNA AUSENTE NO DATASET: {nome_coluna}")
+                ocorrencias.append(
+                    {
+                        "momento": momento,
+                        "tipo_inconsistencia": "Coluna ausente no dataset",
+                        "linha_excel": "",
+                        "id_registro": "",
+                        "coluna": nome_coluna,
+                        "descricao": "Coluna monitorada ausente no dataset",
+                    }
+                )
                 continue
 
             mascara_ausente = (
-                dataframe[nome_coluna].isna() | dataframe[nome_coluna].astype(str).str.strip().eq("")
+                dataframe[nome_coluna].isna()
+                | dataframe[nome_coluna].astype(str).str.strip().eq("")
             )
-            indices_ausentes = dataframe.index[mascara_ausente]
-
-            for indice in indices_ausentes:
-                numero_linha = indice + 2
-                linhas_ausentes.append(
-                    f"Linha {numero_linha} | Coluna {nome_coluna} | Valor ausente"
+            for indice in dataframe.index[mascara_ausente]:
+                identificador = (
+                    dataframe.at[indice, "id"]
+                    if "id" in dataframe.columns
+                    and not pd.isna(dataframe.at[indice, "id"])
+                    else ""
+                )
+                ocorrencias.append(
+                    {
+                        "momento": momento,
+                        "tipo_inconsistencia": "Valor ausente",
+                        "linha_excel": indice + 2,
+                        "id_registro": identificador,
+                        "coluna": nome_coluna,
+                        "descricao": "Valor nulo ou vazio",
+                    }
                 )
 
-        return linhas_ausentes
+        return ocorrencias

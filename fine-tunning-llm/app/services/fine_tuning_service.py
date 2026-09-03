@@ -39,14 +39,8 @@ class FineTuningService:
     CAMINHO_ARQUIVO_FINE_TUNING = Path(
         "app/data/processado/dados_medicos_fine_tuning.xlsx"
     )
-    CAMINHO_ARQUIVO_INFERENCIA_BASE = Path(
-        "app/data/relatorios/inferencia_base.xlsx"
-    )
-    CAMINHO_ARQUIVO_INFERENCIA_FINE_TUNING = Path(
-        "app/data/relatorios/inferencia_fine_tuning.xlsx"
-    )
-    CAMINHO_ARQUIVO_COMPARACAO = Path(
-        "app/data/relatorios/comparacao_inferencias.xlsx"
+    CAMINHO_ARQUIVO_AVALIACAO_INFERENCIAS = Path(
+        "app/data/relatorios/avaliacao_inferencias.xlsx"
     )
     CAMINHO_RELATORIO_METRICAS = Path(
         "app/data/relatorios/metricas_fine_tuning.txt"
@@ -74,6 +68,23 @@ class FineTuningService:
         "assistant",
         COLUNA_TOTAL_TOKENS,
         "split",
+    )
+    COLUNAS_AVALIACAO_MANUAL = (
+        "avaliacao_estrutura",
+        "avaliacao_relevancia_clinica",
+        "avaliacao_alucinacao",
+        "avaliacao_exposicao_pii",
+        "observacoes",
+    )
+    COLUNAS_AVALIACAO_INFERENCIAS = (
+        "id_exemplo",
+        "split",
+        "system",
+        "user",
+        "resposta_esperada",
+        "resposta_inferencia_base",
+        "resposta_inferencia_fine_tuning",
+        *COLUNAS_AVALIACAO_MANUAL,
     )
     SPLITS_ESPERADOS = ("treino", "validacao", "teste")
     MENSAGEM_SYSTEM = (
@@ -308,13 +319,17 @@ class FineTuningService:
         max_novos_tokens: int = 384,
         limite_registros: int | None = LIMITE_REGISTROS_INFERENCIA_TESTE,
     ) -> Path:
-        """Executa a inferencia-base em uma amostra do split de teste."""
+        """Inicia a avaliacao consolidada com as respostas do modelo-base."""
         self.carregar_modelo_base()
-        return self._realizar_inferencia_split_teste(
+        dataframe_inferencia = self._realizar_inferencia_split_teste(
             nome_coluna_resposta="resposta_inferencia_base",
-            caminho_arquivo=self.CAMINHO_ARQUIVO_INFERENCIA_BASE,
             max_novos_tokens=max_novos_tokens,
             limite_registros=limite_registros,
+        )
+        return self._salvar_resultado_inferencia(
+            dataframe_inferencia,
+            nome_coluna_resposta="resposta_inferencia_base",
+            iniciar_novo_ciclo=True,
         )
 
     def realizar_fine_tuning(self, max_passos: int | None = None) -> Path:
@@ -423,120 +438,74 @@ class FineTuningService:
         max_novos_tokens: int = 384,
         limite_registros: int | None = LIMITE_REGISTROS_INFERENCIA_TESTE,
     ) -> Path:
-        """Executa a inferencia ajustada em uma amostra do split de teste."""
+        """Inclui as respostas ajustadas na avaliacao consolidada."""
         self._carregar_modelo_ajustado()
-        return self._realizar_inferencia_split_teste(
+        dataframe_inferencia = self._realizar_inferencia_split_teste(
             nome_coluna_resposta="resposta_inferencia_fine_tuning",
-            caminho_arquivo=self.CAMINHO_ARQUIVO_INFERENCIA_FINE_TUNING,
             max_novos_tokens=max_novos_tokens,
             limite_registros=limite_registros,
         )
+        return self._salvar_resultado_inferencia(
+            dataframe_inferencia,
+            nome_coluna_resposta="resposta_inferencia_fine_tuning",
+            iniciar_novo_ciclo=False,
+        )
 
     def comparar_inferencias(self) -> Path:
-        """Compara as respostas base e ajustada com a resposta esperada."""
+        """Valida a avaliacao consolidada contra o split de teste atual."""
+        if not self.CAMINHO_ARQUIVO_AVALIACAO_INFERENCIAS.exists():
+            raise FileNotFoundError(
+                "Arquivo de avaliacao nao encontrado. Execute as inferencias "
+                "base e ajustada antes da comparacao."
+            )
+
+        dataframe_avaliacao = self.servico_arquivo.gerar_dataframe(
+            self.CAMINHO_ARQUIVO_AVALIACAO_INFERENCIAS
+        )
+        dataframe_avaliacao = self._validar_avaliacao_inferencias(
+            dataframe_avaliacao,
+            exigir_respostas=True,
+        )
+
         dataframe_referencia = self._carregar_dataframe_fine_tuning_validado()
         dataframe_referencia = dataframe_referencia.loc[
             dataframe_referencia["split"] == "teste",
-            ["id_exemplo", "system", "user", "assistant"],
+            ["id_exemplo", "split", "system", "user", "assistant"],
         ].rename(columns={"assistant": "resposta_esperada"})
 
-        dataframe_base = self.servico_arquivo.gerar_dataframe(
-            self.CAMINHO_ARQUIVO_INFERENCIA_BASE
-        )
-        dataframe_ajustado = self.servico_arquivo.gerar_dataframe(
-            self.CAMINHO_ARQUIVO_INFERENCIA_FINE_TUNING
-        )
-        dataframe_base = self._validar_relatorio_inferencia(
-            dataframe_base,
-            "resposta_inferencia_base",
-            "inferencia-base",
-        )
-        dataframe_ajustado = self._validar_relatorio_inferencia(
-            dataframe_ajustado,
-            "resposta_inferencia_fine_tuning",
-            "inferencia fine-tuning",
-        )
-
         ids_referencia = set(dataframe_referencia["id_exemplo"])
-        ids_base = set(dataframe_base["id_exemplo"])
-        ids_ajustado = set(dataframe_ajustado["id_exemplo"])
-        if ids_base != ids_ajustado:
-            raise ValueError(
-                "Os relatorios de inferencia base e ajustada nao possuem os "
-                "mesmos registros."
-            )
-        ids_desconhecidos = ids_base - ids_referencia
+        ids_avaliacao = set(dataframe_avaliacao["id_exemplo"])
+        ids_desconhecidos = ids_avaliacao - ids_referencia
         if ids_desconhecidos:
             raise ValueError(
-                "Os relatorios de inferencia possuem registros que nao "
+                "A avaliacao possui registros que nao "
                 "pertencem ao split de teste: "
                 + ", ".join(sorted(ids_desconhecidos))
             )
 
         dataframe_referencia = dataframe_referencia.loc[
-            dataframe_referencia["id_exemplo"].isin(ids_base)
+            dataframe_referencia["id_exemplo"].isin(ids_avaliacao)
         ]
-
-        comparacao = dataframe_referencia.merge(
-            dataframe_base[
-                [
-                    "id_exemplo",
-                    "system",
-                    "user",
-                    "resposta_inferencia_base",
-                ]
-            ],
+        validacao = dataframe_avaliacao.merge(
+            dataframe_referencia,
             on="id_exemplo",
-            how="left",
+            how="inner",
             validate="one_to_one",
-            suffixes=("", "_base"),
+            suffixes=("", "_referencia"),
         )
-        comparacao = comparacao.merge(
-            dataframe_ajustado[
-                [
-                    "id_exemplo",
-                    "system",
-                    "user",
-                    "resposta_inferencia_fine_tuning",
-                ]
-            ],
-            on="id_exemplo",
-            how="left",
-            validate="one_to_one",
-            suffixes=("", "_fine_tuning"),
-        )
-
-        mensagens_divergentes = (
-            comparacao["system"] != comparacao["system_base"]
-        ) | (comparacao["user"] != comparacao["user_base"])
-        mensagens_divergentes |= (
-            comparacao["system"] != comparacao["system_fine_tuning"]
-        ) | (comparacao["user"] != comparacao["user_fine_tuning"])
-        if mensagens_divergentes.any():
-            raise ValueError(
-                "As mensagens usadas nas inferencias divergem do split de teste."
+        colunas_referencia = ("split", "system", "user", "resposta_esperada")
+        dados_divergentes = pd.Series(False, index=validacao.index)
+        for coluna in colunas_referencia:
+            dados_divergentes |= (
+                validacao[coluna] != validacao[f"{coluna}_referencia"]
             )
 
-        comparacao = comparacao[
-            [
-                "id_exemplo",
-                "system",
-                "user",
-                "resposta_esperada",
-                "resposta_inferencia_base",
-                "resposta_inferencia_fine_tuning",
-            ]
-        ].copy()
-        comparacao["avaliacao_estrutura"] = ""
-        comparacao["avaliacao_relevancia_clinica"] = ""
-        comparacao["avaliacao_alucinacao"] = ""
-        comparacao["avaliacao_exposicao_pii"] = ""
-        comparacao["observacoes"] = ""
+        if dados_divergentes.any():
+            raise ValueError(
+                "Os dados usados nas inferencias divergem do split de teste atual."
+            )
 
-        return self.servico_arquivo.criar_excel(
-            comparacao,
-            self.CAMINHO_ARQUIVO_COMPARACAO,
-        )
+        return self.CAMINHO_ARQUIVO_AVALIACAO_INFERENCIAS
 
     def _carregar_modelo_ajustado(self) -> None:
         """Carrega o modelo-base e o adaptador LoRA salvo localmente."""
@@ -589,10 +558,9 @@ class FineTuningService:
     def _realizar_inferencia_split_teste(
         self,
         nome_coluna_resposta: str,
-        caminho_arquivo: Path,
         max_novos_tokens: int,
         limite_registros: int | None,
-    ) -> Path:
+    ) -> pd.DataFrame:
         """Executa a inferencia atual nos registros reservados para teste."""
         if max_novos_tokens <= 0:
             raise ValueError("A quantidade de novos tokens deve ser positiva.")
@@ -625,23 +593,100 @@ class FineTuningService:
                     "split": "teste",
                     "system": registro["system"],
                     "user": registro["user"],
+                    "resposta_esperada": registro["assistant"],
                     nome_coluna_resposta: resposta,
                 }
             )
 
-        dataframe_inferencia = pd.DataFrame(
+        return pd.DataFrame(
             resultados_inferencia,
             columns=(
                 "id_exemplo",
                 "split",
                 "system",
                 "user",
+                "resposta_esperada",
                 nome_coluna_resposta,
             ),
         )
-        return self.servico_arquivo.criar_excel(
-            dataframe_inferencia,
-            caminho_arquivo,
+
+    def _salvar_resultado_inferencia(
+        self,
+        dataframe_inferencia: pd.DataFrame,
+        nome_coluna_resposta: str,
+        iniciar_novo_ciclo: bool,
+    ) -> Path:
+        """Cria ou atualiza o arquivo unico de avaliacao das inferencias."""
+        colunas_respostas = (
+            "resposta_inferencia_base",
+            "resposta_inferencia_fine_tuning",
+        )
+        if nome_coluna_resposta not in colunas_respostas:
+            raise ValueError("Coluna de resposta da inferencia invalida.")
+        if nome_coluna_resposta not in dataframe_inferencia.columns or (
+            dataframe_inferencia[nome_coluna_resposta]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .eq("")
+            .any()
+        ):
+            raise ValueError(
+                f"A coluna {nome_coluna_resposta} possui respostas vazias."
+            )
+
+        nova_avaliacao = dataframe_inferencia.copy()
+        for coluna in (*colunas_respostas, *self.COLUNAS_AVALIACAO_MANUAL):
+            if coluna not in nova_avaliacao.columns:
+                nova_avaliacao[coluna] = ""
+        nova_avaliacao = self._validar_avaliacao_inferencias(
+            nova_avaliacao[list(self.COLUNAS_AVALIACAO_INFERENCIAS)],
+            exigir_respostas=False,
+        )
+
+        caminho_avaliacao = self.CAMINHO_ARQUIVO_AVALIACAO_INFERENCIAS
+        if iniciar_novo_ciclo or not caminho_avaliacao.exists():
+            return self.servico_arquivo.criar_excel(
+                nova_avaliacao,
+                caminho_avaliacao,
+            )
+
+        avaliacao_atual = self.servico_arquivo.gerar_dataframe(caminho_avaliacao)
+        avaliacao_atual = self._validar_avaliacao_inferencias(
+            avaliacao_atual,
+            exigir_respostas=False,
+        )
+        ids_atuais = set(avaliacao_atual["id_exemplo"])
+        ids_novos = set(nova_avaliacao["id_exemplo"])
+        if ids_atuais != ids_novos:
+            raise ValueError(
+                "A inferencia ajustada nao possui os mesmos registros da "
+                "inferencia-base. Execute novamente a etapa 7."
+            )
+
+        avaliacao_atual = avaliacao_atual.set_index("id_exemplo")
+        nova_avaliacao = nova_avaliacao.set_index("id_exemplo").loc[
+            avaliacao_atual.index
+        ]
+        for coluna in ("split", "system", "user", "resposta_esperada"):
+            if not avaliacao_atual[coluna].equals(nova_avaliacao[coluna]):
+                raise ValueError(
+                    "Os dados da inferencia ajustada divergem da "
+                    "inferencia-base. Execute novamente a etapa 7."
+                )
+
+        avaliacao_atual[nome_coluna_resposta] = nova_avaliacao[
+            nome_coluna_resposta
+        ]
+        for coluna in self.COLUNAS_AVALIACAO_MANUAL:
+            avaliacao_atual[coluna] = ""
+
+        avaliacao_atual = avaliacao_atual.reset_index()[
+            list(self.COLUNAS_AVALIACAO_INFERENCIAS)
+        ]
+        return self.servico_arquivo.atualizar_excel(
+            avaliacao_atual,
+            caminho_avaliacao,
         )
 
     def _gerar_resposta(
@@ -696,7 +741,7 @@ class FineTuningService:
         """Carrega e valida o dataset preparado antes de qualquer uso."""
         dataframe = self.servico_arquivo.gerar_dataframe(
             self.CAMINHO_ARQUIVO_FINE_TUNING
-        ).copy()
+        )
         colunas_ausentes = [
             coluna
             for coluna in self.COLUNAS_DATASET_FINE_TUNING
@@ -891,8 +936,8 @@ class FineTuningService:
             logging_steps=1,
             max_length=self.max_tokens_entrada,
             completion_only_loss=True,
-            seed=42,
-            data_seed=42,
+            seed=self.SEMENTE_ALEATORIA,
+            data_seed=self.SEMENTE_ALEATORIA,
             use_cpu=self.DISPOSITIVO == "cpu",
             fp16=False,
             bf16=False,
@@ -1352,58 +1397,68 @@ class FineTuningService:
             self.CAMINHO_RELATORIO_TECNICO,
         )
 
-    def _validar_relatorio_inferencia(
+    def _validar_avaliacao_inferencias(
         self,
         dataframe: pd.DataFrame,
-        nome_coluna_resposta: str,
-        nome_relatorio: str,
+        exigir_respostas: bool,
     ) -> pd.DataFrame:
-        """Valida um relatorio antes de montar a comparacao final."""
+        """Valida a estrutura e o conteudo do arquivo unico de avaliacao."""
         if dataframe.empty:
-            raise ValueError(
-                f"O relatorio de {nome_relatorio} nao possui registros."
-            )
+            raise ValueError("O arquivo de avaliacao nao possui registros.")
 
-        colunas_necessarias = (
-            "id_exemplo",
-            "system",
-            "user",
-            nome_coluna_resposta,
-        )
         colunas_ausentes = [
             coluna
-            for coluna in colunas_necessarias
+            for coluna in self.COLUNAS_AVALIACAO_INFERENCIAS
             if coluna not in dataframe.columns
         ]
         if colunas_ausentes:
             raise ValueError(
-                f"Colunas ausentes no relatorio de {nome_relatorio}: "
+                "Colunas ausentes no arquivo de avaliacao: "
                 + ", ".join(colunas_ausentes)
             )
 
-        dataframe = dataframe.copy()
+        dataframe = dataframe[list(self.COLUNAS_AVALIACAO_INFERENCIAS)].copy()
         dataframe["id_exemplo"] = dataframe["id_exemplo"].map(
             self._normalizar_identificador
         )
         if (dataframe["id_exemplo"] == "").any():
-            raise ValueError(
-                f"Identificador vazio no relatorio de {nome_relatorio}."
-            )
+            raise ValueError("Identificador vazio no arquivo de avaliacao.")
         if dataframe["id_exemplo"].duplicated().any():
+            raise ValueError("Identificadores repetidos no arquivo de avaliacao.")
+
+        dataframe["split"] = (
+            dataframe["split"].fillna("").astype(str).str.strip().str.casefold()
+        )
+        if not dataframe["split"].eq("teste").all():
             raise ValueError(
-                f"Identificadores repetidos no relatorio de {nome_relatorio}."
+                "O arquivo de avaliacao deve conter apenas registros de teste."
             )
 
-        for coluna in ("system", "user", nome_coluna_resposta):
+        for coluna in ("system", "user", "resposta_esperada"):
             mascara_vazia = dataframe[coluna].isna() | (
                 dataframe[coluna].astype(str).str.strip() == ""
             )
             if mascara_vazia.any():
                 raise ValueError(
-                    f"Valores vazios na coluna {coluna} do relatorio de "
-                    f"{nome_relatorio}."
+                    f"Valores vazios na coluna {coluna} do arquivo de avaliacao."
                 )
             dataframe[coluna] = dataframe[coluna].astype(str).str.strip()
+
+        colunas_respostas = (
+            "resposta_inferencia_base",
+            "resposta_inferencia_fine_tuning",
+        )
+        for coluna in colunas_respostas:
+            dataframe[coluna] = dataframe[coluna].fillna("").astype(str).str.strip()
+            if exigir_respostas and dataframe[coluna].eq("").any():
+                raise ValueError(
+                    f"Valores vazios na coluna {coluna}. Execute as etapas "
+                    "7 e 9 antes da comparacao."
+                )
+
+        for coluna in self.COLUNAS_AVALIACAO_MANUAL:
+            dataframe[coluna] = dataframe[coluna].fillna("")
+
         return dataframe
 
     @staticmethod
