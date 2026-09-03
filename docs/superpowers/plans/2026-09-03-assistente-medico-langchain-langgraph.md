@@ -39,7 +39,7 @@ Transformers, PEFT, Qwen3-0.6B e Rich.
 
 ---
 
-### Tarefa 1: Contratos e repositório de prontuários anonimizados
+### Task 1: Contratos e repositório de prontuários anonimizados
 
 **Arquivos:**
 
@@ -254,7 +254,7 @@ git commit -m "feat: adiciona contratos e repositório do assistente"
 
 ---
 
-### Tarefa 2: Adaptador LangChain para o Qwen ajustado
+### Task 2: Adaptador LangChain para o Qwen ajustado
 
 **Arquivos:**
 
@@ -364,7 +364,7 @@ git commit -m "feat: integra modelo ajustado ao LangChain"
 
 ---
 
-### Tarefa 3: Chain clínica e auditoria sem conteúdo sensível
+### Task 3: Chain clínica e auditoria sem conteúdo sensível
 
 **Arquivos:**
 
@@ -478,7 +478,7 @@ git commit -m "feat: adiciona chain clínica e auditoria segura"
 
 ---
 
-### Tarefa 4: Fluxo LangGraph com aprovação humana obrigatória
+### Task 4: Fluxo LangGraph com aprovação humana obrigatória
 
 **Arquivos:**
 
@@ -665,7 +665,7 @@ git commit -m "feat: orquestra revisão humana com LangGraph"
 
 ---
 
-### Tarefa 5: Integrar o assistente ao menu do terminal
+### Task 5: Integrar o assistente ao menu do terminal
 
 **Arquivos:**
 
@@ -803,7 +803,7 @@ git commit -m "feat: adiciona assistente médico ao menu"
 
 ---
 
-### Tarefa 6: Documentação e verificação completa
+### Task 6: Documentação e verificação completa
 
 **Arquivos:**
 
