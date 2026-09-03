@@ -28,8 +28,6 @@ app/data/processed/*
 app/data/training/*
 !app/data/training/.gitkeep
 
-# Adaptadores e checkpoints locais gerados pelo fine-tuning
-app/modelos/
 
 # Arquivos temporarios criados pelo Excel
 ~$*.xlsx

@@ -81,43 +81,206 @@ tamanho da amostra e do hardware, a etapa pode levar várias horas ou dias.
 
 ## Instalação
 
-Crie e ative um ambiente virtual.
+Execute os comandos abaixo a partir da raiz do projeto. O procedimento instala
+todas as bibliotecas declaradas em `requirements.txt`, o modelo de português do
+spaCy e o modelo-base usado nas etapas de preparação, inferência e treinamento.
+
+### 1. Confirmar a versão do Python
+
+O projeto foi desenvolvido para Python 3.12:
+
+```bash
+python --version
+```
+
+O resultado esperado deve começar com `Python 3.12`. No Windows, caso existam
+várias versões instaladas, também é possível conferir pelo Python Launcher:
+
+```powershell
+py -3.12 --version
+```
+
+### 2. Criar e ativar o ambiente virtual
 
 No PowerShell:
 
 ```powershell
-python -m venv .venv
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+Se a política do PowerShell impedir a ativação, libere scripts somente para a
+sessão atual e tente novamente:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\.venv\Scripts\Activate.ps1
 ```
 
 No Linux ou macOS:
 
 ```bash
-python -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
 ```
 
-Instale as dependências:
+Depois da ativação, confirme que o executável pertence ao ambiente virtual:
 
 ```bash
-python -m pip install --upgrade pip
+python --version
+python -m pip --version
+```
+
+### 3. Instalar todas as dependências do projeto
+
+Atualize as ferramentas de instalação e instale integralmente o arquivo
+`requirements.txt`:
+
+```bash
+python -m pip install --upgrade pip setuptools wheel
 python -m pip install -r requirements.txt
 ```
 
-Instale o modelo de português usado pelo Presidio:
+Esse único comando instala todas as dependências declaradas, incluindo pandas,
+openpyxl, PyArrow, Pydantic, LangChain, LangGraph, scikit-learn, Hugging Face
+Datasets e Hub, Transformers, Accelerate, PEFT, PyTorch, TRL, Evaluate,
+Microsoft Presidio e Rich.
+
+Verifique se não existem dependências ausentes ou versões incompatíveis:
+
+```bash
+python -m pip check
+```
+
+Para consultar as versões efetivamente instaladas:
+
+```bash
+python -m pip freeze
+```
+
+Não é necessário substituir `requirements.txt` pela saída do comando anterior.
+O `pip freeze` é apresentado apenas como diagnóstico do ambiente.
+
+### 4. Instalar o modelo de português do spaCy
+
+O Presidio depende do pacote de linguagem `pt_core_news_sm`, que não é baixado
+automaticamente pelo `pip install -r requirements.txt`:
 
 ```bash
 python -m spacy download pt_core_news_sm
 ```
 
-Baixe o modelo-base para o cache local:
+Valide a instalação:
+
+```bash
+python -m spacy validate
+```
+
+### 5. Confirmar o comando do Hugging Face
+
+O pacote `huggingface-hub` instalado pelo `requirements.txt` disponibiliza o
+comando `hf`. Confirme que ele está sendo executado a partir do ambiente virtual:
+
+```bash
+hf version
+```
+
+O projeto utiliza o comando atual `hf`; não use o comando descontinuado
+`huggingface-cli`.
+
+O modelo `Qwen/Qwen3-0.6B` é público e normalmente não exige autenticação. Caso
+o Hub solicite autenticação ou seja necessário usar uma conta específica, faça
+o login interativo:
+
+```bash
+hf auth login
+hf auth whoami
+```
+
+Nunca informe o token diretamente em comandos versionados nem o grave em
+arquivos do projeto.
+
+### 6. Baixar o modelo-base para o cache local padrão
+
+A opção recomendada é utilizar o cache padrão do Hugging Face:
 
 ```bash
 hf download Qwen/Qwen3-0.6B
 ```
 
-O projeto usa o comando atual `hf`. O comando antigo `huggingface-cli` não é
-necessário.
+O comando baixa tokenizer, configurações e pesos do modelo. Por padrão, o Hub
+armazena os arquivos em uma estrutura semelhante a:
+
+```text
+Windows: %USERPROFILE%\.cache\huggingface\hub
+Linux/macOS: ~/.cache/huggingface/hub
+```
+
+O caminho pode ser diferente quando `HF_HOME` ou `XDG_CACHE_HOME` já estiverem
+configurados no sistema.
+
+O serviço de fine-tuning chama `snapshot_download(..., local_files_only=True)`.
+Assim, depois do download inicial, as etapas do modelo reutilizam os arquivos
+locais e não tentam baixá-los durante a execução.
+
+Confirme que o mesmo ambiente Python consegue localizar o snapshot no cache:
+
+```bash
+python -c "from huggingface_hub import snapshot_download; print(snapshot_download(repo_id='Qwen/Qwen3-0.6B', local_files_only=True))"
+```
+
+O comando deve imprimir o diretório local do snapshot. Se apresentar uma
+mensagem informando que o modelo não foi encontrado, repita o download com o
+mesmo usuário, ambiente virtual e configuração de cache usados para executar o
+projeto.
+
+### 7. Usar um diretório de cache personalizado — opcional
+
+Para armazenar o modelo em outro disco ou diretório, defina `HF_HOME` antes do
+download. Escolha um caminho fora do repositório e com espaço suficiente.
+
+No PowerShell:
+
+```powershell
+$env:HF_HOME = "D:\huggingface-cache"
+hf download Qwen/Qwen3-0.6B
+python -c "from huggingface_hub import snapshot_download; print(snapshot_download(repo_id='Qwen/Qwen3-0.6B', local_files_only=True))"
+```
+
+No Linux ou macOS:
+
+```bash
+export HF_HOME="/caminho/para/huggingface-cache"
+hf download Qwen/Qwen3-0.6B
+python -c "from huggingface_hub import snapshot_download; print(snapshot_download(repo_id='Qwen/Qwen3-0.6B', local_files_only=True))"
+```
+
+A variável precisa continuar definida com o mesmo valor ao iniciar a aplicação.
+Por exemplo, ainda na mesma sessão do terminal:
+
+```bash
+python main.py
+```
+
+Se um novo terminal for aberto, defina `HF_HOME` novamente antes de executar o
+programa ou configure a variável permanentemente no sistema operacional.
+
+Evite usar `hf download --local-dir` para este projeto: esse modo produz uma
+pasta comum, enquanto o código atual procura o modelo na estrutura de cache do
+Hub.
+
+### 8. Verificação final do ambiente
+
+Com o ambiente virtual ativo e o modelo disponível no cache, execute:
+
+```bash
+python -m pip check
+python -m spacy validate
+python -m compileall main.py analisar_tokens.py app/services
+```
+
+Se os comandos terminarem sem erros, o ambiente está preparado para iniciar o
+menu com `python main.py`.
 
 ## Preparação do arquivo de entrada
 
