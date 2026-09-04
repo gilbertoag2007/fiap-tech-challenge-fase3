@@ -26,7 +26,7 @@ print(output["generated_text"])
 
 ## Training procedure
 
-
+ 
 
 
 
@@ -45,7 +45,7 @@ This model was trained with SFT.
 
 
 Cite TRL as:
-
+    
 ```bibtex
 @software{vonwerra2020trl,
   title   = {{TRL: Transformers Reinforcement Learning}},
