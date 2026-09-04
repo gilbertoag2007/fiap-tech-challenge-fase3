@@ -29,17 +29,111 @@ if TYPE_CHECKING:
     from app.services.pii_service import PiiService
     from app.services.qualidade_service import QualidadeService
 else:
+    class ResultadoTratamentoQualidade(Protocol):
+        """Resultado produzido pelas operações de tratamento de qualidade."""
+
+        dataframe_tratado: pd.DataFrame
+        linhas_tratadas: int
+        caminho_arquivo_tratado: Path
+
+    class ResultadoIdentificacaoPii(Protocol):
+        """Resultado produzido pela identificação e anonimização de PII."""
+
+        dataframe_resultado: pd.DataFrame
+        caminho_arquivo_tratado: Path | None
+
     class ArquivoService(Protocol):
-        """Referência leve para as anotações públicas do menu."""
+        """Contrato leve do serviço de arquivos usado pelo menu."""
+
+        def gerar_dataframe(
+            self,
+            caminho_arquivo: Path,
+            percentual_registros: float = 100.0,
+            quantidade_minima: int = 0,
+        ) -> pd.DataFrame:
+            """Lê um dataframe a partir do arquivo indicado."""
+
+        @staticmethod
+        def validar_percentual_registros(percentual_registros: float) -> float:
+            """Valida o percentual de registros solicitado."""
 
     class FineTuningService(Protocol):
-        """Referência leve para as anotações públicas do menu."""
+        """Contrato leve do serviço de fine-tuning usado pelo menu."""
+
+        NOME_MODELO_BASE: str
+        CAMINHO_ARQUIVO_FINE_TUNING: Path
+        CAMINHO_RELATORIO_METRICAS: Path
+        CAMINHO_RELATORIO_TECNICO: Path
+        limite_registros_fine_tuning: int | None
+        quantidade_epocas_fine_tuning: int
+        max_tokens_entrada: int
+        rank_lora: int
+
+        def gerar_dataframe_fine_tuning(self) -> pd.DataFrame:
+            """Prepara o dataframe usado no fine-tuning."""
+
+        def realizar_inferencia_base(self) -> Path:
+            """Executa a inferência do modelo-base."""
+
+        def realizar_fine_tuning(self) -> Path:
+            """Executa o treinamento supervisionado."""
+
+        def realizar_inferencia_fine_tuning(self) -> Path:
+            """Executa a inferência do modelo ajustado."""
+
+        def comparar_inferencias(self) -> Path:
+            """Gera a comparação entre inferências."""
+
+        def gerar_resposta_modelo_ajustado(
+            self,
+            mensagem_system: str,
+            mensagem_usuario: str,
+            max_novos_tokens: int = 384,
+        ) -> str:
+            """Gera uma resposta com o adaptador ajustado."""
 
     class PiiService(Protocol):
-        """Referência leve para as anotações públicas do menu."""
+        """Contrato leve do serviço de PII usado pelo menu."""
+
+        def identificar_e_tratar_pii(
+            self,
+            dataframe: pd.DataFrame,
+            colunas_analisar: list[str],
+            caminho_arquivo_tratado: Path | None = None,
+            percentual_dataframe: float = 100.0,
+        ) -> ResultadoIdentificacaoPii:
+            """Identifica e anonimiza PII no dataframe informado."""
 
     class QualidadeService(Protocol):
-        """Referência leve para as anotações públicas do menu."""
+        """Contrato leve do serviço de qualidade usado pelo menu."""
+
+        def analisar_registros_repetidos(
+            self,
+            dataframe: pd.DataFrame,
+            caminho_relatorio: Path,
+        ) -> Path | None:
+            """Gera o relatório de registros repetidos."""
+
+        def analisar_registros_com_colunas_ausentes(
+            self,
+            dataframe: pd.DataFrame,
+            caminho_relatorio: Path,
+        ) -> Path | None:
+            """Gera o relatório de colunas ausentes."""
+
+        def remover_registros_repetidos(
+            self,
+            dataframe: pd.DataFrame,
+            caminho_arquivo_tratado: Path,
+        ) -> ResultadoTratamentoQualidade:
+            """Remove registros repetidos e retorna seu resumo."""
+
+        def remover_registros_com_colunas_ausentes(
+            self,
+            dataframe: pd.DataFrame,
+            caminho_arquivo_tratado: Path,
+        ) -> ResultadoTratamentoQualidade:
+            """Remove registros com colunas ausentes e retorna seu resumo."""
 
 
 """ Colunas do arquivo a serem analisadas para verificar existencia de PII """
