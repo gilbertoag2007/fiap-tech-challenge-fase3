@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import pandas as pd
 from rich import box
@@ -28,6 +28,18 @@ if TYPE_CHECKING:
     from app.services.fine_tuning_service import FineTuningService
     from app.services.pii_service import PiiService
     from app.services.qualidade_service import QualidadeService
+else:
+    class ArquivoService(Protocol):
+        """Referência leve para as anotações públicas do menu."""
+
+    class FineTuningService(Protocol):
+        """Referência leve para as anotações públicas do menu."""
+
+    class PiiService(Protocol):
+        """Referência leve para as anotações públicas do menu."""
+
+    class QualidadeService(Protocol):
+        """Referência leve para as anotações públicas do menu."""
 
 
 """ Colunas do arquivo a serem analisadas para verificar existencia de PII """
