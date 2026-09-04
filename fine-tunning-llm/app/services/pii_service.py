@@ -69,15 +69,13 @@ class PiiService:
         dataframe: pd.DataFrame,
         colunas_analisar: list[str],
         caminho_arquivo_tratado: Path | None = None,
-        percentual_dataframe: float = 100.0,
     ) -> ResultadoIdentificacaoPii:
-        """Coordena a identificacao e a anonimizacao das PII."""
+        """Identifica e anonimiza PII em todo o dataframe recebido."""
         # Executa a identificacao e inclui as informacoes de PII no dataframe.
         resultado = self.identificar_pii(
             dataframe=dataframe,
             colunas_analisar=colunas_analisar,
             caminho_arquivo_tratado=caminho_arquivo_tratado,
-            percentual_dataframe=percentual_dataframe,
         )
 
         dataframe_anonimizado = self.anonimizar_pii(
@@ -113,7 +111,6 @@ class PiiService:
 
         houve_anonimizacao = False
         linhas_com_pii = dataframe["possui_pii"] == "Sim"
-        entidades_por_campo = {"nome": "PERSON", "cpf": "CPF"}
 
         for indice, valor in dataframe.loc[linhas_com_pii, coluna_original].items():
             if pd.isna(valor) or not str(valor).strip():
@@ -128,19 +125,7 @@ class PiiService:
                 campo, separador, conteudo = linha.partition(":")
                 campo_normalizado = campo.casefold()
 
-                if separador and campo_normalizado in entidades_por_campo:
-                    entidade = entidades_por_campo[campo_normalizado]
-                    resultados = self.analyzer.analyze(
-                        text=conteudo,
-                        language="pt",
-                        entities=[entidade],
-                    )
-                    # O Presidio remove o valor sensivel antes de excluir o campo.
-                    self.anonymizer.anonymize(
-                        text=conteudo,
-                        analyzer_results=resultados,
-                        operators={entidade: OperatorConfig("redact", {})},
-                    )
+                if separador and campo_normalizado in {"nome", "cpf"}:
                     continue
 
                 if separador and campo_normalizado == "sexo":
@@ -183,11 +168,10 @@ class PiiService:
         colunas_analisar: list[str],
     ) -> pd.DataFrame | None:
         """Anonimiza as PII identificadas e atualiza o arquivo de auditoria."""
-        dataframe_resultado = dataframe
-        linhas_com_pii = dataframe_resultado["possui_pii"] == "Sim"
+        linhas_com_pii = dataframe["possui_pii"] == "Sim"
         houve_atualizacao = False
 
-        for indice, registro in dataframe_resultado.loc[linhas_com_pii].iterrows():
+        for indice, registro in dataframe.loc[linhas_com_pii].iterrows():
             entidades = {
                 entidade.strip()
                 for entidade in str(registro["entidades identificadas"]).split(",")
@@ -231,45 +215,36 @@ class PiiService:
                     continue
 
                 coluna_anonimizada = f"{coluna}_anonimizado"
-                if coluna_anonimizada not in dataframe_resultado.columns:
+                if coluna_anonimizada not in dataframe.columns:
                     # Mantem os valores originais nas linhas que nao possuem PII.
-                    dataframe_resultado[coluna_anonimizada] = dataframe_resultado[
-                        coluna
-                    ].astype("object")
+                    dataframe[coluna_anonimizada] = dataframe[coluna].astype("object")
 
-                dataframe_resultado.at[indice, coluna_anonimizada] = texto_anonimizado
+                dataframe.at[indice, coluna_anonimizada] = texto_anonimizado
                 houve_atualizacao = True
 
         if not houve_atualizacao:
             return None
 
         self.servico_arquivo.atualizar_excel(
-            dataframe_resultado,
+            dataframe,
             self.CAMINHO_ARQUIVO_AUDITORIA,
         )
-        return dataframe_resultado
+        return dataframe
 
     def identificar_pii(
         self,
         dataframe: pd.DataFrame,
         colunas_analisar: list[str],
         caminho_arquivo_tratado: Path | None = None,
-        percentual_dataframe: float = 100.0,
     ) -> ResultadoIdentificacaoPii:
         """Identifica PII nas colunas informadas e atualiza o arquivo Excel."""
         # Inclui as colunas de resultado no dataframe recebido.
-        dataframe_resultado = dataframe
-        dataframe_resultado["entidades identificadas"] = ""
-        dataframe_resultado["possui_pii"] = ""
+        dataframe["entidades identificadas"] = ""
+        dataframe["possui_pii"] = ""
 
-        registros_analisar = self.servico_arquivo.selecionar_percentual_registros(
-            dataframe_resultado,
-            percentual_dataframe,
-        )
-
-        for indice, registro in registros_analisar.iterrows():
+        for indice, registro in dataframe.iterrows():
             entidades_identificadas: list[str] = []
-            dataframe_resultado.at[indice, "possui_pii"] = "Não"
+            dataframe.at[indice, "possui_pii"] = "Não"
 
             for coluna in colunas_analisar:
                 valor = registro[coluna]
@@ -290,19 +265,19 @@ class PiiService:
             if entidades_identificadas:
                 # Remove repeticoes e separa por virgula as entidades do registro.
                 entidades_identificadas = list(dict.fromkeys(entidades_identificadas))
-                dataframe_resultado.at[indice, "entidades identificadas"] = ", ".join(
+                dataframe.at[indice, "entidades identificadas"] = ", ".join(
                     entidades_identificadas
                 )
-                dataframe_resultado.at[indice, "possui_pii"] = "Sim"
+                dataframe.at[indice, "possui_pii"] = "Sim"
 
         # Atualiza o Excel somente quando um caminho de destino for informado.
         if caminho_arquivo_tratado is not None:
             caminho_arquivo_tratado = self.servico_arquivo.atualizar_excel(
-                dataframe_resultado,
+                dataframe,
                 caminho_arquivo_tratado,
             )
 
         return ResultadoIdentificacaoPii(
-            dataframe_resultado=dataframe_resultado,
+            dataframe_resultado=dataframe,
             caminho_arquivo_tratado=caminho_arquivo_tratado,
         )

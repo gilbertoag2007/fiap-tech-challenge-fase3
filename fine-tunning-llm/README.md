@@ -1,33 +1,57 @@
-# Relatório técnico — pipeline local e assistente médico demonstrável
+# Fine-tuning de LLM e assistente clínico com LangChain/LangGraph
 
-## Objetivo, escopo e limites
+Relatório técnico do Tech Challenge — Fase 3 da FIAP. O projeto implementa um
+pipeline Python 3.12 para preparar e anonimizar dados médicos, ajustar o modelo
+[`Qwen/Qwen3-0.6B`](https://huggingface.co/Qwen/Qwen3-0.6B) com SFT/LoRA,
+comparar as respostas antes e depois do treinamento e consultar contexto
+estruturado por um assistente com revisão humana obrigatória.
 
-O projeto demonstra, para fins acadêmicos, um pipeline Python 3.12 que transforma registros tabulares locais em exemplos conversacionais anonimizados, faz SFT do `Qwen/Qwen3-0.6B` com LoRA em CPU e permite consultar contexto estruturado por um assistente sujeito a revisão humana obrigatória. Ele não pretende validar eficácia clínica, substituir protocolo institucional ou disponibilizar um produto de saúde.
+> **Uso exclusivamente acadêmico e experimental.** O sistema não foi validado
+> como dispositivo médico e não deve diagnosticar, prescrever, recomendar dose,
+> realizar triagem de emergência, atualizar prontuários ou tomar qualquer decisão
+> clínica autônoma. Toda saída do assistente é um rascunho probabilístico e só é
+> liberada depois de uma decisão humana explícita.
 
-> **Não usar em assistência real.** O sistema não diagnostica, prescreve, recomenda dose, executa conduta, atualiza prontuários nem toma decisão clínica. A saída é um rascunho probabilístico, possivelmente incompleto, incorreto, desatualizado ou alucinado. A pessoa revisora qualificada é responsável por avaliar fontes, alertas e conteúdo antes de qualquer uso.
+## Matriz de atendimento ao enunciado
 
-Somente exemplos sintéticos devem aparecer em documentação, terminal, issues e apresentações. Não publique nem versione dados brutos/anonimizados, PHI/PII, modelos, adaptadores, checkpoints ou logs de execução. A árvore `app/data/` é local e não deve ser inspecionada durante tarefas automatizadas deste projeto.
-
-## Matriz de rastreabilidade dos requisitos
-
-| Requisito das páginas 2–4 do enunciado | Implementação/evidência | Como demonstrar |
+| Requisito do trabalho | Implementação/evidência | Demonstração recomendada |
 | --- | --- | --- |
-| Fine-tuning de LLM com dados internos (protocolos, perguntas e modelos de documentos) | `FineTuningService` prepara conversas e treina Qwen3-0.6B com LoRA; as fontes concretas dependem de dados institucionais autorizados | Executar opções 6–10 com artefatos locais autorizados; mostrar somente resultados sintéticos ou agregados. |
-| Preprocessing, anonimização e curadoria | Opções 2–6; `QualidadeService`, `PiiService` e validações de colunas, IDs, duplicidade, splits e tokens | Mostrar relatórios agregados e tokens substituídos; revisar amostra local sem exibi-la. |
-| Pipeline LangChain com LLM customizada | `ModeloChatQwenLocal` adapta a inferência Qwen/LoRA; `AssistenteChain` usa `ChatPromptTemplate` e LCEL | Opção 11, após LoRA local existir. |
-| Consulta a base estruturada | `RepositorioProntuariosExcel` busca um ID único no Excel anonimizado e expõe allowlist de campos | Consultar um ID sintético em ambiente de demonstração. |
-| Resposta contextualizada com dados atuais | O repositório recupera o registro no momento da pergunta; a chain serializa o contexto estruturado como dado não executável | Mostrar os campos-fonte, sem revelar conteúdo clínico real. |
-| Limites contra sugestões impróprias e validação humana | Prompt restritivo, validação de seções, alertas, `interrupt` e aprovação explícita | Rejeitar um rascunho e confirmar que nada é liberado; depois aprovar um exemplo sintético. |
-| Logging, auditoria e explainability | `ServicoAuditoriaAssistente` grava JSONL apenas com metadados; fontes são nomes de campos permitidos, não invenções da LLM | Mostrar uma linha de log sanitizada e as fontes no painel de revisão. |
-| Código Python modular e README completo | Serviços separados em `app/services/`; assistente em `app/assistente/`; este relatório | Navegar pelos módulos e rodar as verificações desta documentação. |
-| Fluxos LangGraph | `FluxoAssistenteMedico` implementa grafo, estado, nós, rota condicional e checkpointer | Exibir o fluxo abaixo e a pausa/reinício da opção 11. |
-| Dataset anonimizado ou exemplos sintéticos | O pipeline produz dataset local anonimizado; este README fornece somente exemplos sintéticos | Incluir no repositório apenas exemplo sintético quando a política institucional permitir. |
-| Relatório técnico, diagrama LangChain e avaliação | Seções “Fine-tuning”, “Avaliação” e diagramas Mermaid abaixo | Apresentar métricas geradas localmente, sem inventar resultados. |
-| Vídeo de até 15 minutos | Roteiro nesta documentação | Gravar treinamento, fluxo, pergunta contextualizada e auditoria. |
+| Fine-tuning de LLM com dados internos | `FineTuningService` prepara conversas e ajusta o Qwen3-0.6B com LoRA | Executar as opções 6–10 e mostrar apenas métricas agregadas |
+| Preprocessing, curadoria e anonimização | `ArquivoService`, `QualidadeService` e `PiiService` | Mostrar relatórios de qualidade e tokens de anonimização, sem expor registros |
+| Pipeline LangChain com LLM customizada | `ModeloChatQwenLocal` + `AssistenteChain` com LCEL | Executar a opção 11 com um exemplo autorizado |
+| Consulta a base estruturada | `RepositorioProntuariosExcel` consulta um ID único em Excel anonimizado | Mostrar somente os nomes dos campos-fonte recuperados |
+| Resposta contextualizada | O contexto atual é serializado como dado não executável no prompt | Comparar pergunta, fontes e rascunho na tela de revisão |
+| Limites contra sugestões impróprias | Prompt restritivo, quatro seções obrigatórias, alertas e aviso fixo | Demonstrar rejeição e aprovação humana |
+| Logging e auditoria | `ServicoAuditoriaAssistente` grava apenas metadados em JSONL | Exibir uma linha sanitizada, sem pergunta, prontuário ou resposta |
+| Código Python modular | Serviços em `app/services/` e assistente em `app/assistente/` | Navegar pela estrutura descrita abaixo |
+| Fluxo LangGraph | Grafo de estados, rota condicional, `interrupt` e `Command(resume=...)` | Pausar a execução e retomá-la após a decisão humana |
+| Dataset anonimizado ou exemplos sintéticos | O pipeline produz artefato anonimizado localmente; este documento usa exemplo sintético | Não publicar dados clínicos reais |
+| Relatório, arquitetura e avaliação | Este README, `FLUXO_PIPELINE.md`, diagramas e critérios de avaliação | Apresentar resultados agregados e limitações |
+| Vídeo de até 15 minutos | Roteiro ao final deste documento | Gravar uma execução segura do fluxo |
 
-PubMedQA e MedQuAD são sugestões do enunciado, não datasets incorporados ao repositório nem executados pelo código. Qualquer adoção exige licença, curadoria clínica, compatibilidade de idioma/uso e anonimização antes de entrar no pipeline.
+PubMedQA e MedQuAD são referências sugeridas no enunciado, mas não fazem parte do
+código executado. Antes de incorporar qualquer fonte adicional, é necessário
+avaliar licença, idioma, autorização, adequação clínica e privacidade.
 
-## Arquitetura e estrutura
+## Funcionalidades
+
+- leitura e amostragem reproduzível de arquivo Excel;
+- identificação e remoção de registros duplicados ou incompletos;
+- relatório consolidado de qualidade antes e depois do tratamento;
+- detecção de PII/PHI com Microsoft Presidio e spaCy em português;
+- reconhecimento específico de CPF e anonimização de campos textuais;
+- construção de conversas `system`, `user` e `assistant`;
+- divisão reproduzível em treino, validação e teste;
+- validações de campos, IDs, splits, duplicidades e quantidade de tokens;
+- inferência com o modelo-base;
+- Supervised Fine-Tuning com TRL e adaptador LoRA;
+- inferência com o modelo ajustado e comparação para avaliação manual;
+- consulta estruturada a prontuário anonimizado por ID;
+- geração contextualizada via LangChain usando o Qwen/LoRA local;
+- fluxo LangGraph com pausa e revisão humana obrigatória;
+- auditoria sanitizada e indicação determinística dos campos-fonte.
+
+## Arquitetura
 
 ```mermaid
 flowchart LR
@@ -43,107 +67,370 @@ flowchart LR
     I --> J
     J --> K["FluxoAssistenteMedico (LangGraph)"]
     K --> L["Revisão humana"]
-    K --> M["JSONL de metadados"]
+    K --> M["Auditoria JSONL de metadados"]
+```
+
+O pipeline principal segue esta sequência:
+
+```mermaid
+flowchart TD
+    A["Selecionar percentual da amostra"] --> B["2. Ler Excel"]
+    B --> C["3. Verificar qualidade"]
+    C --> D["4. Tratar inconsistências"]
+    D --> E["5. Detectar e anonimizar PII"]
+    E --> F["6. Preparar conversas e splits"]
+    F --> G["7. Inferência com modelo-base"]
+    G --> H["8. Fine-tuning SFT com LoRA"]
+    H --> I["9. Inferência com modelo ajustado"]
+    I --> J["10. Comparar respostas"]
+    J --> K["11. Consulta com revisão humana"]
+```
+
+## Estrutura do projeto
+
+```text
+.
+├── main.py
+├── analisar_tokens.py
+├── FLUXO_PIPELINE.md
+├── requirements.txt
+└── app
+    ├── assistente
+    │   ├── auditoria.py
+    │   ├── chain.py
+    │   ├── fluxo.py
+    │   ├── modelo_chat.py
+    │   ├── modelos.py
+    │   └── repositorio.py
+    ├── services
+    │   ├── arquivo_service.py
+    │   ├── qualidade_service.py
+    │   ├── pii_service.py
+    │   └── fine_tuning_service.py
+    ├── data
+    │   ├── original
+    │   ├── processado
+    │   └── relatorios
+    └── modelos
+        └── qwen3_06b_lora
 ```
 
 | Caminho | Responsabilidade |
 | --- | --- |
-| [`main.py`](main.py) | Menu Rich, orquestração das etapas e interação de revisão. |
-| [`app/services/arquivo_service.py`](app/services/arquivo_service.py) | Leitura/escrita local de Excel e TXT. |
-| [`app/services/qualidade_service.py`](app/services/qualidade_service.py) | Relatórios e tratamento de duplicidades/campos ausentes. |
-| [`app/services/pii_service.py`](app/services/pii_service.py) | Detecção e anonimização de PII/PHI textual. |
-| [`app/services/fine_tuning_service.py`](app/services/fine_tuning_service.py) | Dataset, SFT/LoRA, inferências, métricas e comparação. |
-| [`app/assistente/repositorio.py`](app/assistente/repositorio.py) | Consulta controlada ao Excel anonimizado. |
-| [`app/assistente/modelo_chat.py`](app/assistente/modelo_chat.py) | Adaptador `BaseChatModel` para a inferência local Qwen/LoRA. |
-| [`app/assistente/chain.py`](app/assistente/chain.py) | Prompt, LCEL, parser, seções e aviso determinístico. |
-| [`app/assistente/fluxo.py`](app/assistente/fluxo.py) | Orquestração LangGraph e bloqueio por revisão humana. |
-| [`app/assistente/auditoria.py`](app/assistente/auditoria.py) | Eventos JSON Lines sanitizados. |
+| `main.py` | Interface Rich, estado da sessão, atalhos do pipeline e revisão humana |
+| `analisar_tokens.py` | Diagnóstico manual da distribuição de tokens |
+| `app/services/arquivo_service.py` | Leitura, amostragem e gravação atômica de Excel |
+| `app/services/qualidade_service.py` | Relatório e tratamento de duplicidades/ausências |
+| `app/services/pii_service.py` | Detecção e anonimização de PII/PHI |
+| `app/services/fine_tuning_service.py` | Dataset, treinamento, inferência e avaliação |
+| `app/assistente/repositorio.py` | Consulta controlada ao Excel anonimizado |
+| `app/assistente/modelo_chat.py` | Adaptador `BaseChatModel` para Qwen/LoRA local |
+| `app/assistente/chain.py` | Prompt, LCEL, parser, seções e aviso determinístico |
+| `app/assistente/fluxo.py` | Estado LangGraph, pausa e decisão humana |
+| `app/assistente/auditoria.py` | Eventos JSONL sem conteúdo clínico |
 
-## Dados, qualidade, preprocessing, curadoria e privacidade
+Uma descrição complementar das etapas está em
+[`FLUXO_PIPELINE.md`](FLUXO_PIPELINE.md).
 
-O arquivo de origem é lido localmente; as opções 3 e 4 identificam e removem registros duplicados e registros com campos monitorados ausentes, gerando relatórios antes/depois. A opção 5 examina as colunas textuais configuradas em `COLUNAS_ANALISADAS_PII` com Microsoft Presidio e `pt_core_news_sm` do spaCy. O reconhecedor adicional detecta CPF; as entidades monitoradas incluem `PERSON`, `PHONE_NUMBER`, `DATE_TIME` e `CPF`.
+## Tecnologias
 
-Quando necessário, a pergunta recebe substituições como `[nome do paciente]`, `[Telefone do paciente]`, `[Data de nascimento]` e `[cpf]`. O prontuário recebe tratamento específico: linhas de nome/CPF são removidas e o sexo é preservado em forma normalizada. A anonimização reduz risco, mas não comprova ausência de reidentificação: a curadoria humana deve revisar falsos positivos/negativos, minimização de campos, autorização, retenção, acesso e aderência às políticas institucionais/LGPD.
+- Python 3.12;
+- pandas, openpyxl e PyArrow;
+- Rich;
+- Microsoft Presidio e spaCy;
+- PyTorch e Transformers;
+- Hugging Face Datasets, Hub e Evaluate;
+- TRL e PEFT/LoRA;
+- LangChain e LangGraph.
 
-Antes de treinamento/inferência, o serviço exige colunas de origem, campos não vazios, IDs únicos, conversas não repetidas, splits válidos e ao menos três exemplos elegíveis. O total de tokens é medido com o mesmo chat template do Qwen; exemplos com total **menor que** o limite configurado de 512 tornam-se elegíveis. O sistema mantém contagem agregada de descartes e estatísticas por split, sem registrar conteúdo clínico no relatório de métricas.
+O pacote `langchain-openai` está declarado, mas o fluxo descrito aqui não usa API
+externa. O assistente chama somente o Qwen/LoRA local.
+
+## Pré-requisitos
+
+- Python 3.12;
+- espaço para o modelo-base e os artefatos de treinamento;
+- arquivo Excel compatível e autorizado;
+- modelo spaCy `pt_core_news_sm` instalado;
+- `Qwen/Qwen3-0.6B` disponível no cache local do Hugging Face.
+
+O treinamento está configurado para CPU e `torch.float32`. Dependendo da amostra
+e do hardware, ele pode levar várias horas ou dias.
+
+## Instalação
+
+Execute os comandos dentro de `fine-tunning-llm`.
+
+### 1. Confirmar o Python
+
+```bash
+python --version
+```
+
+O resultado esperado começa com `Python 3.12`. No Windows também é possível usar
+`py -3.12 --version`.
+
+### 2. Criar e ativar o ambiente virtual
+
+Linux ou macOS:
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+```
+
+PowerShell:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+Se a política do PowerShell bloquear a ativação, libere scripts apenas na sessão
+atual:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
+```
+
+### 3. Instalar dependências
+
+```bash
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -r requirements.txt
+python -m pip check
+```
+
+`python -m pip freeze` pode ser usado para diagnóstico, mas não é necessário
+substituir `requirements.txt` por sua saída.
+
+### 4. Instalar o modelo de português
+
+```bash
+python -m spacy download pt_core_news_sm
+python -m spacy validate
+```
+
+### 5. Preparar o cache do Hugging Face
+
+Use o comando atual `hf`; `huggingface-cli` está descontinuado.
+
+```bash
+hf version
+hf download Qwen/Qwen3-0.6B
+python -c "from huggingface_hub import snapshot_download; print(snapshot_download(repo_id='Qwen/Qwen3-0.6B', local_files_only=True))"
+```
+
+O modelo é público e normalmente não exige autenticação. Se o Hub solicitar uma
+conta, use `hf auth login` e nunca grave o token no projeto.
+
+O serviço usa `snapshot_download(..., local_files_only=True)`: depois do download
+inicial, a execução reutiliza o cache e não inicia downloads automaticamente.
+
+Para usar outro disco, defina `HF_HOME` antes do download e também antes de cada
+execução. Escolha um caminho fora do repositório:
+
+```bash
+export HF_HOME="/caminho/para/huggingface-cache"
+hf download Qwen/Qwen3-0.6B
+python main.py
+```
+
+No PowerShell, use `$env:HF_HOME = "D:\huggingface-cache"`. Evite `hf download
+--local-dir`, pois o código procura o snapshot na estrutura de cache do Hub.
+
+## Preparação do arquivo de entrada
+
+O Excel de origem deve existir em:
+
+```text
+app/data/original/dados_medicos_base.xlsx
+```
+
+O original é somente leitura; transformações devem ser gravadas nas pastas de
+processamento, relatórios ou modelos. As colunas principais esperadas incluem:
+
+- `id`;
+- `papel_solicitante`;
+- `contexto_solicitacao`;
+- `pergunta_original`;
+- `prontuario_contexto`;
+- `resposta_estruturada`;
+- `especialidade_medica`;
+- `tipo_pergunta`.
+
+Colunas clínicas adicionais são monitoradas pela qualidade, anonimização e
+consulta estruturada. A ausência de campos obrigatórios interrompe a etapa com
+mensagem descritiva.
+
+## Execução pelo menu
+
+```bash
+python main.py
+```
+
+Antes do menu, informe um percentual maior que zero e menor ou igual a 100. O
+fluxo tenta garantir ao menos três exemplos para distribuir treino, validação e
+teste.
+
+| Opção | Ação | Dependência principal |
+| ---: | --- | --- |
+| `0` | Executa as etapas 2–6 | Arquivo local autorizado; não inicia treinamento |
+| `1` | Executa as etapas 7–10 | Dataset preparado, cache do Qwen e LoRA para 9–10 |
+| `2` | Lê e amostra o Excel | Arquivo de origem |
+| `3` | Analisa duplicidades e ausências | Etapa 2 na mesma sessão |
+| `4` | Remove inconsistências | Etapa 2 na mesma sessão |
+| `5` | Detecta e anonimiza PII | Etapa 4 e modelo spaCy |
+| `6` | Prepara conversas e splits | Etapas 2–5 e cache do Qwen |
+| `7` | Executa inferência-base | Dataset válido e cache do Qwen |
+| `8` | Executa SFT/LoRA | Dataset, cache, CPU/RAM/tempo suficientes |
+| `9` | Executa inferência ajustada | Dataset, cache e adaptador LoRA |
+| `10` | Compara as inferências | Saídas das etapas 7 e 9 |
+| `11` | Consulta o assistente com revisão humana | Excel anonimizado, cache e adaptador |
+| `12` | Encerra a aplicação | Nenhuma |
+
+Fluxo recomendado: `0` → `1` → `11`. Para executar granularmente, use `2` →
+`3` → `4` → `5` → `6` na mesma sessão; depois `7` → `8` → `9` → `10`; por
+fim `11`. As etapas isoladas dependem do estado ou dos artefatos produzidos pelas
+anteriores.
+
+## Qualidade, preprocessing, curadoria e anonimização
+
+As etapas 3 e 4 verificam e removem registros duplicados ou com campos
+monitorados ausentes. A etapa 5 usa Presidio e `pt_core_news_sm` para buscar
+`PERSON`, `PHONE_NUMBER`, `DATE_TIME` e `CPF` nas colunas configuradas.
+
+A anonimização integrada produz `pergunta_original_anonimizado` e
+`prontuario_contexto_anonimizado`. Substituições incluem marcadores de nome,
+telefone, data e CPF; linhas identificadoras do prontuário recebem tratamento
+específico.
+
+A detecção automática reduz risco, mas não garante remoção completa de PII/PHI.
+A curadoria humana deve revisar falsos positivos/negativos, minimização, base
+legal, retenção, controle de acesso e aderência à LGPD. Revise também
+`papel_solicitante`, `contexto_solicitacao` e `resposta_estruturada`, pois esses
+campos participam das conversas.
 
 ## Dataset conversacional
 
-A etapa 6 produz localmente um Excel de fine-tuning com `id_exemplo`, `system`, `user`, `assistant`, `total_okens_fine_tunning` e `split`, além de metadados de especialidade e tipo de pergunta. O nome da coluna de tokens reproduz exatamente o código atual. Cada linha corresponde a uma conversa:
+A etapa 6 produz um Excel com:
 
-```text
-system: política fixa de apoio clínico e quatro seções obrigatórias
-user: Papel do solicitante + Contexto da solicitação + Prontuário anonimizado + Pergunta anonimizada
-assistant: resposta_estruturada de referência
-```
+| Campo | Finalidade |
+| --- | --- |
+| `id_exemplo` | Identificador único |
+| `system` | Política de comportamento e formato |
+| `user` | Papel, solicitação, prontuário e pergunta anonimizados |
+| `assistant` | Resposta de referência |
+| `especialidade_medica` | Metadado preservado |
+| `tipo_pergunta` | Metadado preservado |
+| `total_okens_fine_tunning` | Quantidade de tokens; grafia legada mantida pelo código |
+| `split` | `treino`, `validacao` ou `teste` |
 
-Para o `SFTTrainer`, a conversa é convertida em `prompt` (mensagens `system` e `user`) e `completion` (mensagem `assistant`); a perda é calculada somente na completion. O split usa embaralhamento com seed 42 e alvo 80% treino / 10% validação / 10% teste. Em conjuntos pequenos, preserva-se pelo menos um item de validação e um de teste; por isso a proporção pode sofrer arredondamento. Depois do filtro de tokens, os splits são recalculados.
+As conversas são convertidas em `prompt` (`system` + `user`) e `completion`
+(`assistant`), com perda calculada apenas sobre a completion. O split usa seed 42
+e alvo 80%/10%/10%, preservando ao menos um item de validação e um de teste em
+conjuntos pequenos. Exemplos com 512 tokens ou mais são removidos, e os splits
+são recalculados. O conjunto de teste não participa do `SFTTrainer`.
 
-Exemplo exclusivamente sintético de esquema (não é dado do projeto):
+Exemplo exclusivamente sintético:
 
 ```json
 {
   "id_exemplo": "DEMO-0001",
-  "system": "Você é um assistente de apoio clínico...",
-  "user": "Papel do solicitante: Profissional fictício\nContexto da solicitação: demonstração\nProntuário: Paciente fictício sem identificadores\nPergunta: Quais pontos devem ser revisados?",
-  "assistant": "Resposta: Rascunho sintético.\nConsiderações clínicas: Revisar contexto.\nConduta/Orientação: Submeter ao profissional.\nLimitações: Exemplo não clínico.",
+  "system": "Você é um assistente acadêmico de apoio clínico...",
+  "user": "Prontuário fictício sem identificadores. Quais pontos devem ser revisados?",
+  "assistant": "Resposta: exemplo sintético. Considerações clínicas: revisar contexto. Conduta/Orientação: submeter ao profissional. Limitações: não é orientação clínica.",
   "split": "teste"
 }
 ```
 
 ## Fine-tuning do Qwen3-0.6B
 
-O carregamento é local (`local_files_only=True`), em CPU e `torch.float32`. Não há inferência remota nem envio de conteúdo a provedores externos. O tokenizer usa o chat template do modelo com `enable_thinking=False`; o prompt de entrada é truncado à esquerda e limitado a 512 tokens. A geração é determinística (`do_sample=False`) e produz, por padrão, até 384 tokens novos nas inferências do pipeline.
-
-| Item | Configuração implementada |
+| Parâmetro | Valor implementado |
 | --- | --- |
-| Modelo-base | `Qwen/Qwen3-0.6B` no cache Hugging Face local |
+| Modelo-base | `Qwen/Qwen3-0.6B` |
 | Método | SFT com TRL e PEFT/LoRA para `CAUSAL_LM` |
-| LoRA | `r=16`, `lora_alpha=32`, `lora_dropout=0.05`, `bias="none"`, módulos `q_proj` e `v_proj` |
-| Treinamento | 3 épocas, `learning_rate=1e-4`, batch por dispositivo 1, acumulação 8, `adamw_torch` |
-| Reprodutibilidade | `seed=42`, `data_seed=42`; resultados ainda dependem de versões, CPU e dados locais |
-| Avaliação/checkpoints | `eval_strategy="epoch"`, `save_strategy="epoch"`, até 2 checkpoints, melhor modelo por `eval_loss` |
-| Precisão/dispositivo | CPU, float32, sem fp16/bf16, sem gradient checkpointing |
+| Dispositivo e precisão | CPU, `torch.float32` |
+| Limite da sequência | 512 tokens |
+| Épocas | 3 |
+| Learning rate | `1e-4` |
+| Lote por dispositivo | 1 |
+| Acumulação / lote efetivo | 8 / 8 |
+| LoRA | `r=16`, alpha 32, dropout 0,05, `bias="none"` |
+| Módulos ajustados | `q_proj` e `v_proj` |
+| Avaliação e checkpoint | A cada época; até 2 checkpoints; melhor por `eval_loss` |
+| Reprodutibilidade | `seed=42` e `data_seed=42` |
+| Geração | Determinística, sem thinking, até 384 tokens novos |
+| Inferências comparativas | 3 exemplos de teste por padrão |
 
-### Comandos reproduzíveis
+O tokenizer aplica o chat template do Qwen com `enable_thinking=False`; a
+entrada é truncada à esquerda. Resultados ainda podem variar por versões,
+hardware e dados locais.
 
-No diretório deste README:
+## Resultado experimental registrado na main
 
-```bash
-python3.12 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-python -m spacy download pt_core_news_sm
-hf download Qwen/Qwen3-0.6B
-python main.py
-```
+Uma execução com 10% dos dados produziu 1.303 exemplos elegíveis: 1.042 de
+treino, 130 de validação e 131 de teste.
 
-No menu, execute a opção 0 para preparar dados (2–6), depois a opção 1 (7–10) ou as etapas individuais. O download apenas preenche o cache local; o código exige esse cache e falha de forma explícita se ele não estiver disponível. O treinamento em CPU pode ser lento e requer RAM/armazenamento compatíveis com o ambiente. Não use `huggingface-cli`, que está descontinuado; use `hf`.
+| Métrica de validação | Modelo-base | Modelo ajustado |
+| --- | ---: | ---: |
+| Loss | 2,5002 | 0,6778 |
+| Perplexidade | aproximadamente 12,18 | 1,97 |
+| Acurácia média por token | 52,12% | 86,41% |
+| Entropia | 1,5878 | 0,6783 |
 
-Artefatos locais esperados após as execuções: dataset preparado, inferências base/ajustada, comparação, métricas TXT, relatório técnico XLSX, checkpoints e adaptador LoRA com tokenizer. Eles não são entregáveis versionados. `/tmp` pode ser usado apenas para verificações transitórias: não é versionado, não é caminho de artefato do projeto e não deve conter dados clínicos.
+O treinamento registrado realizou 393 passos em aproximadamente 10h29min na
+CPU. Foram ajustados 2.293.760 de 598.344.000 parâmetros, cerca de 0,383% do
+total. Esses números evidenciam convergência técnica no conjunto de validação,
+mas não comprovam precisão, utilidade ou segurança clínica.
 
-## Avaliação: base versus ajustado
+## Avaliação das inferências
 
-A opção 7 gera a inferência-base no split `teste`; a 9 gera a inferência com o adaptador; a 10 exige os mesmos IDs e as mesmas mensagens e cria uma comparação lado a lado com a referência. Por padrão, as inferências limitam-se aos três primeiros registros ordenados do teste. A comparação inclui campos para avaliação manual de estrutura, relevância clínica, alucinação, exposição de PII e observações.
+A etapa 7 gera respostas do modelo-base, a 9 gera respostas do modelo ajustado e
+a 10 exige os mesmos IDs/mensagens para criar uma comparação lado a lado com a
+referência. A avaliação manual deve considerar:
 
-Não há métricas ou resultados pré-calculados neste repositório, e esta documentação não inventa números. Após uma execução autorizada, registre em relatório local: `eval_loss` antes/depois, perplexidade derivada quando calculável, `eval_mean_token_accuracy` quando fornecida pelo runtime, passos, parâmetros treináveis/totais, estatísticas agregadas de tokens e julgamento humano cego ou revisado por caso. A opção 8 grava métricas e um relatório técnico local; a opção 10 guarda o quadro de comparação. Avalie também aderência às quatro seções, fidelidade ao contexto/fonte, segurança de orientação, ausência de PII e limites de generalização. Métricas de treino não comprovam validade clínica.
+- aderência às quatro seções exigidas;
+- estrutura e relevância clínica;
+- fidelidade ao contexto e aos campos-fonte;
+- alucinação e afirmações sem sustentação;
+- segurança da orientação;
+- exposição de PII/PHI;
+- limitações e capacidade de generalização.
+
+Loss, perplexidade e acurácia por token não substituem avaliação humana nem
+validação clínica.
 
 ## Assistente com LangChain e dados estruturados
 
-`ModeloChatQwenLocal` implementa um adaptador de `BaseChatModel`: reúne mensagens de sistema e usuário e chama `FineTuningService.gerar_resposta_modelo_ajustado`, usando exclusivamente Qwen/LoRA local. `AssistenteChain` monta um `ChatPromptTemplate` e compõe LCEL (`prompt | modelo | StrOutputParser()`). O contexto é serializado em JSON como dado não executável; instruções contidas no contexto não devem ser seguidas.
+`ModeloChatQwenLocal` implementa `BaseChatModel`, reúne mensagens de sistema e
+usuário e chama `FineTuningService.gerar_resposta_modelo_ajustado`. Não há envio
+do contexto a um provedor externo.
 
-`RepositorioProntuariosExcel` busca exatamente um ID e recusa ausência ou duplicidade. Ele expõe somente campos não vazios da allowlist: `prontuario_contexto_anonimizado`, hipótese clínica, diagnóstico confirmado, exames relevantes, medicamentos utilizados, alergias, diagnósticos anteriores e especialidade médica. As fontes exibidas são os **nomes dos campos efetivamente retornados**; não constituem evidência científica nem são geradas pela LLM.
+`AssistenteChain` monta um `ChatPromptTemplate` e compõe LCEL:
 
-O prompt exige as quatro seções abaixo. A chain valida sua presença e acrescenta de forma determinística fontes e o aviso de revisão humana:
+```text
+prompt | ModeloChatQwenLocal | StrOutputParser
+```
 
-1. `Resposta`
-2. `Considerações clínicas`
-3. `Conduta/Orientação`
-4. `Limitações`
+O contexto estruturado é serializado como JSON e tratado como dado não
+executável. Instruções encontradas dentro do prontuário não devem ser obedecidas.
 
-## LangGraph e decisão humana
+`RepositorioProntuariosExcel` busca exatamente um ID e recusa registro ausente ou
+duplicado. A allowlist expõe somente campos não vazios como prontuário
+anonimizado, hipótese, diagnóstico, exames, medicamentos, alergias, antecedentes
+e especialidade. As “fontes” mostradas ao revisor são os nomes desses campos,
+não referências científicas inventadas pela LLM.
 
-O grafo usa `EstadoAssistente` serializável e os nós `validar_entrada`, `consultar_registro`, `gerar_rascunho`, `validar_seguranca`, `solicitar_revisao_humana`, `finalizar_aprovacao` e `finalizar_rejeicao`. Ele é compilado com `InMemorySaver`, portanto serve apenas à demonstração local: o estado interrompido não deve ser considerado persistente quando o processo termina.
+O rascunho deve conter:
+
+1. `Resposta`;
+2. `Considerações clínicas`;
+3. `Conduta/Orientação`;
+4. `Limitações`.
+
+## LangGraph e revisão humana
 
 ```mermaid
 flowchart TD
@@ -154,140 +441,160 @@ flowchart TD
     E --> F["interrupt: revisão humana"]
     F -->|"Command(resume={aprovado: true})"| G["Finalizar aprovação"]
     F -->|"Command(resume={aprovado: false})"| H["Finalizar rejeição"]
-    G --> I["Liberar rascunho como resposta"]
+    G --> I["Liberar resposta"]
     H --> J["Não liberar conteúdo"]
 ```
 
-Na opção 11, a execução interrompe após mostrar rascunho, fontes, alertas e aviso. A pessoa revisora informa `s` ou `n` e uma observação opcional. O fluxo é retomado com `Command(resume=...)`; apenas a rota aprovada copia o rascunho para a resposta pública. Alertas não são um selo de segurança: sempre exigem julgamento profissional.
+O estado passa pelos nós `validar_entrada`, `consultar_registro`,
+`gerar_rascunho`, `validar_seguranca`, `solicitar_revisao_humana`,
+`finalizar_aprovacao` e `finalizar_rejeicao`. O grafo usa `InMemorySaver`,
+adequado à demonstração local, mas não a persistência clínica durável.
 
-## Segurança, auditoria e interface
+Na opção 11, a interface mostra rascunho, fontes, alertas e aviso e exige `s` ou
+`n`, além de observação opcional. Somente a rota aprovada copia o rascunho para a
+resposta pública; a rejeição não libera conteúdo.
 
-- O prompt proíbe ações e prescrições automáticas; a validação detecta ausência de seções, fontes e aviso.
-- O repositório usa allowlist, valida colunas obrigatórias e exige correspondência única de ID.
-- A auditoria JSONL registra somente metadados: horário UTC, UUID de execução, etapa, situação, nomes de fontes, códigos de alerta, decisão humana e tipo de erro. Não aceita/grava ID de registro, pergunta, prontuário, rascunho, resposta ou observação.
-- O payload de `interrupt` é destinado à sessão de revisão e não ao arquivo JSONL. `InMemorySaver` não é armazenamento clínico durável.
-- A interface Rich apresenta tabelas/painéis, estados e mensagens de erro; não substitui controles de acesso, criptografia, gestão de segredos, revisão de LGPD ou governança institucional.
-
-## Instalação e cache
-
-Use Python 3.12. Mantenha o ambiente virtual, cache Hugging Face, modelos e artefatos de treinamento apenas na máquina/autorização adequada. Não há chave de API exigida pelo fluxo atual.
-
-```bash
-cd fine-tunning-llm
-python3.12 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-python -m spacy download pt_core_news_sm
-hf download Qwen/Qwen3-0.6B
-```
-
-As dependências incluem pandas/openpyxl/pyarrow para dados, Presidio e spaCy para PII, Transformers/Datasets/Accelerate/PEFT/TRL/Torch/Evaluate para o modelo, LangChain/LangGraph para orquestração e Rich para o terminal. O adaptador `langchain-openai` está declarado, mas o assistente descrito aqui não o chama nem requer API externa.
-
-## Execução pelo menu (0–12)
-
-| Opção | Ação | Dependência |
-| --- | --- | --- |
-| 0 | Executa preparação 2–6 | Arquivo local autorizado; encerra antes de treinamento. |
-| 1 | Executa 7–10 | Dataset preparado, cache Qwen e, para 9–10, LoRA produzido na 8. |
-| 2 | Lê Excel e gera dataframe | Arquivo de origem local. |
-| 3 | Analisa repetidos e ausentes | Etapa 2 na mesma sessão. |
-| 4 | Remove inconsistências e salva auditoria | Etapa 2 na mesma sessão. |
-| 5 | Identifica/trata PII | Etapa 4 na mesma sessão e modelo spaCy instalado. |
-| 6 | Prepara dataset conversacional | Etapas 2–5 na mesma sessão, cache Qwen para contar tokens. |
-| 7 | Inferência-base | Dataset válido e cache Qwen. |
-| 8 | SFT/LoRA | Dataset válido e cache Qwen; CPU/RAM/tempo suficientes. |
-| 9 | Inferência ajustada | Dataset válido, cache Qwen e adaptador LoRA da 8. |
-| 10 | Compara inferências | Relatórios das opções 7 e 9 para os mesmos exemplos de teste. |
-| 11 | Consulta com revisão humana | Excel anonimizado compatível, cache Qwen e adaptador LoRA. |
-| 12 | Sai do programa | Nenhuma. |
-
-Fluxo recomendado: `0` → `1` → `11`. Para granularidade, use `2` → `3` → `4` → `5` → `6` na **mesma execução** do programa; depois `7` → `8` → `9` → `10`; por fim `11`. A opção 1 não prepara dados e a opção 0 não treina. Execute com:
-
-```bash
-python main.py
-```
-
-Exemplo de interação puramente sintética:
+Exemplo sintético:
 
 ```text
 Opção: 11
 ID do registro: DEMO-0001
-Pergunta clínica: Em um cenário fictício, quais pontos precisam de revisão profissional?
+Pergunta clínica: Em um cenário fictício, quais pontos exigem revisão?
 Decisão do revisor: s
 Observação: Aprovação exclusivamente demonstrativa.
 ```
 
-## Verificações reproduzíveis
+## Auditoria, segurança e explicabilidade
 
-Estes comandos não executam o pipeline nem leem artefatos clínicos. Rode-os a partir da raiz do repositório:
+- o prompt proíbe diagnóstico, prescrição e ação automática;
+- a chain verifica seções, fontes e aviso;
+- o repositório usa allowlist e correspondência única de ID;
+- o log JSONL aceita somente horário UTC, UUID de execução, etapa, situação,
+  nomes dos campos-fonte, códigos de alerta, decisão humana e tipo de erro;
+- ID do registro, pergunta, prontuário, rascunho, resposta e observação não são
+  persistidos pelo serviço de auditoria;
+- o payload do `interrupt` pertence à sessão e não ao log permanente;
+- indicar os campos consultados oferece rastreabilidade, mas não explica o
+  raciocínio interno do modelo nem constitui evidência científica;
+- controles institucionais de acesso, criptografia, retenção, segredos, LGPD e
+  governança continuam necessários.
+
+Nunca versione dados brutos ou arquivos com PII/PHI. Não publique datasets,
+adaptadores, checkpoints ou modelos adicionais sem revisão e autorização.
+
+## Artefatos gerados
+
+| Caminho | Conteúdo |
+| --- | --- |
+| `app/data/processado/dados_medicos_auditoria.xlsx` | Registros tratados e informações de PII |
+| `app/data/processado/dados_medicos_fine_tuning.xlsx` | Conversas, tokens, metadados e splits |
+| `app/data/relatorios/relatorio_qualidade.xlsx` | Qualidade antes/depois |
+| `app/data/relatorios/avaliacao_inferencias.xlsx` | Referência, modelo-base, ajustado e avaliação manual |
+| `app/data/relatorios/metricas_fine_tuning.txt` | Métricas agregadas |
+| `app/data/relatorios/relatorio_tecnico_fine_tuning.xlsx` | Avaliação técnica do treinamento |
+| `app/data/relatorios/auditoria_assistente.jsonl` | Metadados do fluxo do assistente |
+| `app/modelos/qwen3_06b_lora/` | Adaptador, tokenizer e checkpoints |
+
+Trate todos esses artefatos como locais e potencialmente sensíveis.
+
+## Validação sem carregar dados ou modelo
+
+O projeto não mantém suíte unitária versionada. Estas verificações não executam
+o pipeline, não abrem o Excel e não carregam o modelo:
 
 ```bash
+python -m compileall main.py analisar_tokens.py app/services app/assistente
+python -c "from app.assistente import AssistenteChain, FluxoAssistenteMedico, ModeloChatQwenLocal"
 git diff --check
-python3 -m compileall fine-tunning-llm/main.py fine-tunning-llm/app/services fine-tunning-llm/app/assistente
-rg -n -e 'TO''DO' -e 'TB''D' -e 'XX''X' README.md fine-tunning-llm/README.md
-git diff --name-only
 ```
 
-A última saída deve conter apenas `README.md` e `fine-tunning-llm/README.md` para esta alteração. Se usar arquivos temporários em `/tmp`, trate-os como descartáveis e não versionados; não armazene dados clínicos neles.
+`analisar_tokens.py` acessa o dataset preparado; execute-o somente quando houver
+autorização para utilizar os dados.
 
-## Troubleshooting e limitações
+## Troubleshooting
 
 | Situação | Ação segura |
 | --- | --- |
-| `hf` ou modelo ausente no cache | Execute `hf download Qwen/Qwen3-0.6B` em ambiente autorizado; não habilite fallback remoto. |
-| Modelo spaCy ausente | Execute `python -m spacy download pt_core_news_sm` no ambiente virtual. |
-| Etapa 6 informa colunas/valores/splits inválidos | Refaça qualidade e anonimização; revise a curadoria local sem expor conteúdo. |
-| Menos de três exemplos elegíveis | Aumente somente uma amostra autorizada ou revise tokens/curadoria; não invente dados reais. |
-| Registro inexistente/duplicado na opção 11 | Corrija o artefato anonimizado local; a consulta exige uma única correspondência. |
-| Rascunho sem seções/fontes/aviso | Não o use como resposta final; revise o fluxo e mantenha a validação humana. |
-| Processo foi encerrado durante a revisão | Recomece: `InMemorySaver` não persiste a interrupção. |
-| Treinamento lento ou sem recursos | Planeje execução CPU, reduza apenas o escopo autorizado para experimento e documente a limitação. |
+| `hf` ou modelo não encontrado | Rode `hf download Qwen/Qwen3-0.6B` com o mesmo usuário, ambiente e `HF_HOME` |
+| Modelo spaCy ausente | Rode `python -m spacy download pt_core_news_sm` |
+| Etapa 6 recusa colunas/valores/splits | Refaça qualidade e anonimização e revise a curadoria local |
+| Menos de três exemplos elegíveis | Aumente apenas a amostra autorizada ou revise o limite de tokens |
+| Registro ausente/duplicado na opção 11 | Corrija o artefato anonimizado; a consulta exige uma correspondência |
+| Rascunho sem seções/fontes/aviso | Não aprove; mantenha a validação e investigue o fluxo |
+| Processo encerrou durante a revisão | Recomece; `InMemorySaver` não persiste a interrupção |
+| Treinamento lento | Planeje CPU/RAM/tempo e documente qualquer redução do experimento |
 
-Limitações centrais: avaliação clínica manual; ausência de testes automatizados por decisão do projeto; inferências comparativas limitadas por padrão a três registros de teste; dependência de arquivos locais e cache; e nenhuma garantia de completude de anonimização, explicabilidade científica ou segurança clínica.
+## Limitações conhecidas
 
-## Roteiro de vídeo (até 15 minutos)
+- treinamento em CPU demorado;
+- limite de 512 tokens pode excluir casos extensos e introduzir viés;
+- anonimização automática pode deixar escapar PII/PHI;
+- campos que entram na conversa ainda exigem curadoria humana;
+- inferências comparativas usam três casos de teste por padrão;
+- avaliação clínica permanece manual;
+- `especialidade_medica` e `tipo_pergunta` são metadados e não entram no prompt
+  de treinamento;
+- o adaptador depende dos pesos do modelo-base;
+- contexto estruturado não equivale a evidência científica;
+- `InMemorySaver` não mantém revisões após o encerramento do processo.
 
-1. **0:00–1:00 — contexto e limites:** objetivo acadêmico, aviso médico, privacidade e escopo local.
-2. **1:00–3:30 — preparação:** opções 0 ou 2–6, qualidade, Presidio/spaCy, anonimização e dataset conversacional; não mostrar dados reais.
-3. **3:30–6:30 — treinamento:** cache Qwen, configuração SFT/LoRA, CPU/float32, splits e artefatos locais; mostrar somente métricas agregadas de uma execução autorizada.
-4. **6:30–9:00 — avaliação:** opções 7–10, comparação base/ajustado e critérios humanos, sem afirmar métricas inexistentes.
-5. **9:00–13:00 — assistente:** opção 11 com pergunta e ID sintéticos, contexto estruturado, quatro seções, fontes, `interrupt`, rejeição e aprovação.
-6. **13:00–15:00 — auditoria e encerramento:** JSONL sanitizado, validações, limitações e próximos controles institucionais necessários.
+## Roteiro do vídeo — até 15 minutos
 
-## Checklist de entregáveis
+1. **0:00–1:00 — objetivo e limites:** escopo acadêmico, aviso médico e privacidade.
+2. **1:00–3:30 — preparação:** opções 2–6, qualidade, Presidio/spaCy e dataset; não mostrar dados reais.
+3. **3:30–6:30 — treinamento:** Qwen, SFT/LoRA, CPU, splits, parâmetros e métricas agregadas.
+4. **6:30–9:00 — avaliação:** opções 7–10, comparação base/ajustado e critérios humanos.
+5. **9:00–13:00 — assistente:** LangChain, consulta estruturada, LangGraph, rejeição e aprovação.
+6. **13:00–15:00 — auditoria e conclusão:** log sanitizado, limitações e controles necessários.
 
-- [x] Código-fonte do pipeline de fine-tuning, integração LangChain e fluxo LangGraph.
-- [x] README técnico com processo, arquitetura, diagrama e critérios de avaliação.
-- [x] Demonstração de dados sintéticos nesta documentação; dados reais permanecem locais.
-- [x] Mecanismo de anonimização, validação humana, fontes e auditoria de metadados.
-- [ ] Execução local autorizada do treinamento e preenchimento dos resultados reais/agregados da avaliação.
-- [ ] Vídeo final de até 15 minutos gravado conforme o roteiro.
+## Checklist de entrega
+
+- [x] pipeline de preprocessing, qualidade e anonimização;
+- [x] fine-tuning Qwen3-0.6B com SFT/LoRA;
+- [x] métricas experimentais agregadas documentadas;
+- [x] comparação de inferências preparada para avaliação humana;
+- [x] integração LangChain com modelo local e base estruturada;
+- [x] fluxo LangGraph com aprovação humana obrigatória;
+- [x] auditoria sanitizada e campos-fonte;
+- [x] relatório técnico, diagramas, comandos e roteiro do vídeo;
+- [ ] avaliação clínica final das respostas;
+- [ ] vídeo final gravado e revisado.
 
 ## Referências
 
-- [LangChain — visão geral](https://docs.langchain.com/oss/python/langchain/overview) e [LCEL](https://python.langchain.com/docs/concepts/lcel/)
-- [LangGraph — visão geral](https://docs.langchain.com/oss/python/langgraph/overview) e [interrupts / human-in-the-loop](https://docs.langchain.com/oss/python/langgraph/interrupts)
+- [LangChain — visão geral](https://docs.langchain.com/oss/python/langchain/overview)
+- [LangChain Expression Language](https://python.langchain.com/docs/concepts/lcel/)
+- [LangGraph — visão geral](https://docs.langchain.com/oss/python/langgraph/overview)
+- [LangGraph — interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts)
 - [Hugging Face Hub — download e cache](https://huggingface.co/docs/huggingface_hub/guides/download)
 - [Transformers — treinamento](https://huggingface.co/docs/transformers/training)
 - [PEFT — LoRA](https://huggingface.co/docs/peft/main/en/conceptual_guides/lora)
 - [TRL — SFTTrainer](https://huggingface.co/docs/trl/sft_trainer)
-- [Microsoft Presidio](https://microsoft.github.io/presidio/) e [spaCy](https://spacy.io/models/pt)
+- [Microsoft Presidio](https://microsoft.github.io/presidio/)
+- [spaCy — modelos em português](https://spacy.io/models/pt)
 - [Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3-0.6B)
-- [PubMedQA](https://pubmedqa.github.io/) e [MedQuAD](https://github.com/abachaa/MedQuAD) — sugestões que requerem avaliação prévia de uso.
+- [PubMedQA](https://pubmedqa.github.io/)
+- [MedQuAD](https://github.com/abachaa/MedQuAD)
 
 ## Glossário
 
 | Termo | Definição neste projeto |
 | --- | --- |
-| PII/PHI | Informação pessoal/saúde identificável que deve ser minimizada e protegida. |
-| Preprocessing | Leitura, checagem, limpeza e estruturação antes do treinamento. |
-| Curadoria | Revisão humana de qualidade, adequação, privacidade e autorização dos exemplos. |
-| Fine-tuning / SFT | Ajuste supervisionado do modelo a pares de prompt e completion. |
-| LoRA | Adaptador de baixo rank que treina poucos parâmetros adicionais. |
-| Split | Partição em treino, validação e teste para treinamento e análise separada. |
-| Token | Unidade processada pelo tokenizer; limita contexto e custo computacional. |
-| LangChain / LCEL | Biblioteca e composição declarativa usadas para prompt, modelo e parser. |
-| LangGraph | Orquestrador de estados e decisões com pausa/reinício. |
-| `interrupt` / `Command` | Pausa para revisão humana e comando que retoma a execução com decisão. |
-| Explainability | Neste demonstrador, indicação determinística dos campos-fonte consultados; não é explicação científica da LLM. |
+| PII/PHI | Informação pessoal ou de saúde identificável que deve ser minimizada e protegida |
+| Preprocessing | Leitura, checagem, limpeza e estruturação antes do treinamento |
+| Curadoria | Revisão humana de qualidade, adequação, autorização e privacidade |
+| SFT | Ajuste supervisionado do modelo com prompts e respostas esperadas |
+| LoRA | Adaptador de baixo rank que treina uma pequena parcela dos parâmetros |
+| Split | Partição separada para treino, validação ou teste |
+| Token | Unidade processada pelo tokenizer e usada no limite de contexto |
+| LangChain / LCEL | Biblioteca e composição declarativa de prompt, modelo e parser |
+| LangGraph | Orquestrador de estados, rotas e pausas do fluxo |
+| `interrupt` / `Command` | Pausa para revisão humana e retomada com a decisão |
+| Explainability | Indicação determinística dos campos consultados; não é explicação científica da LLM |
+
+## Licenças e responsabilidade
+
+O modelo-base Qwen3-0.6B é distribuído sob Apache 2.0. Verifique separadamente
+as licenças do código, dataset e artefatos produzidos. O uso do repositório e de
+seus resultados é responsabilidade do usuário e deve respeitar autorizações,
+políticas institucionais e legislação aplicável.

@@ -76,14 +76,7 @@ class ArquivoService:
 
     def criar_excel(self, dataframe: pd.DataFrame, caminho_arquivo: Path) -> Path:
         """Cria um arquivo Excel a partir de um dataframe e retorna seu caminho."""
-        self._validar_extensao_xlsx(caminho_arquivo)
-
-        caminho_arquivo.parent.mkdir(parents=True, exist_ok=True)
-        if caminho_arquivo.exists():
-            caminho_arquivo.unlink()
-
-        dataframe.to_excel(caminho_arquivo, index=False)
-        return caminho_arquivo
+        return self.atualizar_excel(dataframe, caminho_arquivo)
 
     def criar_arquivo_txt(
         self,
@@ -112,7 +105,20 @@ class ArquivoService:
         caminho_arquivo: Path,
     ) -> Path:
         """Atualiza um arquivo Excel com as colunas e linhas do dataframe."""
+        return self.atualizar_excel_com_abas(
+            {"Sheet1": dataframe},
+            caminho_arquivo,
+        )
+
+    def atualizar_excel_com_abas(
+        self,
+        dataframes: dict[str, pd.DataFrame],
+        caminho_arquivo: Path,
+    ) -> Path:
+        """Atualiza atomicamente um Excel composto por uma ou mais abas."""
         self._validar_extensao_xlsx(caminho_arquivo)
+        if not dataframes:
+            raise ValueError("Informe ao menos uma aba para gerar o arquivo Excel.")
 
         caminho_arquivo.parent.mkdir(parents=True, exist_ok=True)
         with NamedTemporaryFile(
@@ -125,7 +131,13 @@ class ArquivoService:
 
         try:
             # Grava um XLSX completo antes de substituir o destino existente.
-            dataframe.to_excel(caminho_temporario, index=False)
+            with pd.ExcelWriter(caminho_temporario, engine="openpyxl") as escritor:
+                for nome_aba, dataframe in dataframes.items():
+                    dataframe.to_excel(
+                        escritor,
+                        sheet_name=nome_aba,
+                        index=False,
+                    )
             caminho_temporario.replace(caminho_arquivo)
         finally:
             # Remove o temporario caso a gravacao ou a substituicao falhe.
