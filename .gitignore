@@ -209,6 +209,9 @@ tempCodeRunnerFile.py
 # Worktrees locais usados para desenvolver branches isoladas.
 .worktrees/
 
+# Artefatos locais de planejamento do Superpowers.
+/docs/superpowers/
+
 # PyPI configuration file
 .pypirc
 
