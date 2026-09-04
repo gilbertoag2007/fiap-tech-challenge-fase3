@@ -202,6 +202,19 @@ class PiiService:
                     entities=list(entidades),
                 )
 
+                nome_paciente = str(registro.get("nome_paciente", "")).casefold()
+                resultados = [
+                    resultado
+                    for resultado in resultados
+                    if resultado.entity_type != "PERSON"
+                    or (
+                        len(texto_original[resultado.start:resultado.end].strip()) >= 3
+                        and texto_original[
+                            resultado.start:resultado.end
+                        ].strip().casefold() in nome_paciente
+                    )
+                ]
+
                 if not resultados:
                     continue
 

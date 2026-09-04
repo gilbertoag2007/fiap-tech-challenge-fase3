@@ -5,7 +5,8 @@ from math import ceil, exp, isfinite
 from pathlib import Path
 from statistics import median
 from typing import Any
-
+import unsloth
+from unsloth import FastLanguageModel
 import pandas as pd
 import torch
 from datasets import Dataset, DatasetDict
@@ -25,22 +26,61 @@ from app.services.arquivo_service import ArquivoService
 class FineTuningService:
     """Prepara, treina e avalia o modelo usado no fine-tuning."""
 
-    NOME_MODELO_BASE = "Qwen/Qwen3-0.6B"
-    DISPOSITIVO = "cpu"
+    NOME_MODELO_BASE = "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit"
+    DISPOSITIVO = "cuda" if torch.cuda.is_available() else "cpu"
     MAX_TOKENS_ENTRADA = 512
     LIMITE_REGISTROS_FINE_TUNING = None
     QUANTIDADE_EPOCAS_FINE_TUNING = 3
     RANK_LORA = 16
+    BATCH_TREINO = 2
+    ACUMULACAO_GRADIENTE = 4
     SEMENTE_ALEATORIA = 42
-    LIMITE_REGISTROS_INFERENCIA_TESTE = 3
+    LIMITE_REGISTROS_INFERENCIA_TESTE = 50
+    MODULOS_LORA = ("q_proj", "k_proj", "v_proj", "o_proj")
+    MODELOS_DISPONIVEIS = {
+        "llama": {
+            "rotulo": "Llama 3.1 8B Instruct QLoRA",
+            "nome_base": "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit",
+            "caminho_adapter": Path("app/modelos/llama31_8b_instruct_lora"),
+            "loader": "unsloth",
+            "comando_download": (
+                "hf download unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit"
+            ),
+        },
+        "qwen10": {
+            "rotulo": "Qwen3-0.6B 10%",
+            "nome_base": "Qwen/Qwen3-0.6B",
+            "caminho_adapter": Path(
+                "app/modelos/qwen_06b_lora/qwen3_06b_lora_10pct"
+            ),
+            "loader": "transformers",
+            "comando_download": "hf download Qwen/Qwen3-0.6B",
+        },
+        "qwen80": {
+            "rotulo": "Qwen3-0.6B 80% (q/k/v/o)",
+            "nome_base": "Qwen/Qwen3-0.6B",
+            "caminho_adapter": Path(
+                "app/modelos/qwen_06b_lora/"
+                "qwen3_06b_lora_80pct_more_projections"
+            ),
+            "loader": "transformers",
+            "comando_download": "hf download Qwen/Qwen3-0.6B",
+        },
+    }
     CAMINHO_ARQUIVO_AUDITORIA = Path(
         "app/data/processado/dados_medicos_auditoria.xlsx"
     )
     CAMINHO_ARQUIVO_FINE_TUNING = Path(
         "app/data/processado/dados_medicos_fine_tuning.xlsx"
     )
-    CAMINHO_ARQUIVO_AVALIACAO_INFERENCIAS = Path(
-        "app/data/relatorios/avaliacao_inferencias.xlsx"
+    CAMINHO_ARQUIVO_INFERENCIA_BASE = Path(
+        "app/data/relatorios/inferencia_base.xlsx"
+    )
+    CAMINHO_ARQUIVO_INFERENCIA_FINE_TUNING = Path(
+        "app/data/relatorios/inferencia_fine_tuning.xlsx"
+    )
+    CAMINHO_ARQUIVO_COMPARACAO = Path(
+        "app/data/relatorios/comparacao_inferencias.xlsx"
     )
     CAMINHO_RELATORIO_METRICAS = Path(
         "app/data/relatorios/metricas_fine_tuning.txt"
@@ -48,7 +88,7 @@ class FineTuningService:
     CAMINHO_RELATORIO_TECNICO = Path(
         "app/data/relatorios/relatorio_tecnico_fine_tuning.xlsx"
     )
-    CAMINHO_MODELO_FINE_TUNING = Path("app/modelos/qwen3_06b_lora")
+    CAMINHO_MODELO_FINE_TUNING = Path("app/modelos/llama31_8b_instruct_lora")
     CAMINHO_CHECKPOINTS = CAMINHO_MODELO_FINE_TUNING / "checkpoints"
     COLUNA_TOTAL_TOKENS = "total_okens_fine_tunning"
     COLUNAS_NECESSARIAS = (
@@ -68,23 +108,6 @@ class FineTuningService:
         "assistant",
         COLUNA_TOTAL_TOKENS,
         "split",
-    )
-    COLUNAS_AVALIACAO_MANUAL = (
-        "avaliacao_estrutura",
-        "avaliacao_relevancia_clinica",
-        "avaliacao_alucinacao",
-        "avaliacao_exposicao_pii",
-        "observacoes",
-    )
-    COLUNAS_AVALIACAO_INFERENCIAS = (
-        "id_exemplo",
-        "split",
-        "system",
-        "user",
-        "resposta_esperada",
-        "resposta_inferencia_base",
-        "resposta_inferencia_fine_tuning",
-        *COLUNAS_AVALIACAO_MANUAL,
     )
     SPLITS_ESPERADOS = ("treino", "validacao", "teste")
     MENSAGEM_SYSTEM = (
@@ -138,9 +161,131 @@ class FineTuningService:
         self.modelo: PreTrainedModel | PeftModel | None = None
         self.modelo_ajustado_carregado = False
         self.quantidade_registros_descartados_tokens = 0
+        self._fast_language_model = None
+        self.chave_modelo = "llama"
+        self.loader_modelo = "unsloth"
+        self.configurar_modelo("llama")
+
+    def configurar_modelo(self, chave_modelo: str) -> None:
+        """Seleciona Llama ou Qwen para inferencia/assistente e limpa cache."""
+        chave = chave_modelo.strip().lower()
+        if chave not in self.MODELOS_DISPONIVEIS:
+            disponiveis = ", ".join(sorted(self.MODELOS_DISPONIVEIS))
+            raise ValueError(
+                f"Modelo '{chave_modelo}' invalido. Use um de: {disponiveis}."
+            )
+        configuracao = self.MODELOS_DISPONIVEIS[chave]
+        self.chave_modelo = chave
+        self.loader_modelo = configuracao["loader"]
+        self.NOME_MODELO_BASE = configuracao["nome_base"]
+        self.CAMINHO_MODELO_FINE_TUNING = Path(configuracao["caminho_adapter"])
+        self.CAMINHO_CHECKPOINTS = (
+            self.CAMINHO_MODELO_FINE_TUNING / "checkpoints"
+        )
+        self.tokenizer = None
+        self.modelo = None
+        self.modelo_ajustado_carregado = False
+        self._fast_language_model = None
+
+    def gerar_resposta_modelo_ajustado(
+        self,
+        mensagem_system: str,
+        mensagem_usuario: str,
+        max_novos_tokens: int = 384,
+    ) -> str:
+        """Gera uma resposta usando o adaptador LoRA configurado (Llama/Qwen)."""
+        self._carregar_modelo_ajustado()
+        return self._gerar_resposta(
+            mensagem_system=mensagem_system,
+            mensagem_usuario=mensagem_usuario,
+            max_novos_tokens=max_novos_tokens,
+        )
+
+    @staticmethod
+    def _importar_fast_language_model():
+        """Retorna o FastLanguageModel do Unsloth (importado no topo do modulo)."""
+        return FastLanguageModel
+
+    def _obter_caminho_modelo_base(self) -> Path:
+        """Resolve o caminho local do modelo-base no cache do Hugging Face."""
+        try:
+            return Path(
+                snapshot_download(
+                    repo_id=self.NOME_MODELO_BASE,
+                    local_files_only=True,
+                )
+            )
+        except OSError as erro:
+            raise FileNotFoundError(
+                "Modelo base nao encontrado no cache local. Execute: "
+                f"hf download {self.NOME_MODELO_BASE}"
+            ) from erro
+
+    def _obter_implementacao_atencao(self) -> str:
+        """Prefere Flash Attention 2; caso contrario usa SDPA."""
+        try:
+            import flash_attn  # noqa: F401
+        except ImportError:
+            return "sdpa"
+        return "flash_attention_2"
+
+    def _carregar_modelo_unsloth(self, para_treino: bool = False) -> None:
+        """Carrega tokenizer e modelo 4-bit via Unsloth FastLanguageModel."""
+        if self.DISPOSITIVO != "cuda":
+            raise RuntimeError(
+                "O modelo Llama 8B Instruct em 4-bit exige GPU CUDA. "
+                "Verifique se o PyTorch reconhece a placa de video."
+            )
+
+        FastLanguageModel = self._importar_fast_language_model()
+        self._fast_language_model = FastLanguageModel
+        caminho_modelo = self._obter_caminho_modelo_base()
+        implementacao_atencao = self._obter_implementacao_atencao()
+
+        kwargs_carregamento: dict[str, Any] = {
+            "model_name": str(caminho_modelo),
+            "max_seq_length": self.max_tokens_entrada,
+            "dtype": None,
+            "load_in_4bit": True,
+        }
+        # Unsloth escolhe o backend mais rapido; quando Flash Attn 2 existe,
+        # reforcamos a preferencia pelo backend explicito.
+        if implementacao_atencao == "flash_attention_2":
+            kwargs_carregamento["attn_implementation"] = "flash_attention_2"
+
+        try:
+            self.modelo, self.tokenizer = FastLanguageModel.from_pretrained(
+                **kwargs_carregamento
+            )
+        except TypeError:
+            kwargs_carregamento.pop("attn_implementation", None)
+            self.modelo, self.tokenizer = FastLanguageModel.from_pretrained(
+                **kwargs_carregamento
+            )
+
+        self._configurar_tokenizer()
+        if para_treino:
+            self.modelo.train()
+        else:
+            FastLanguageModel.for_inference(self.modelo)
+            self.modelo.eval()
+        print(
+            "Modelo carregado com Unsloth Fast "
+            f"(atencao={implementacao_atencao}, max_seq={self.max_tokens_entrada})."
+        )
+
+    def _configurar_tokenizer(self) -> None:
+        """Padroniza pad/padding para treino e inferencia com Llama."""
+        if self.tokenizer is None:
+            raise RuntimeError("Tokenizer nao carregado.")
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+        self.tokenizer.padding_side = "right"
+        self.tokenizer.truncation_side = "left"
+        self.tokenizer.clean_up_tokenization_spaces = False
 
     def carregar_modelo_base(self) -> None:
-        """Carrega tokenizer e modelo-base do cache para execucao em CPU."""
+        """Carrega tokenizer e modelo-base com Unsloth Fast (QLoRA 4-bit)."""
         if (
             self.tokenizer is not None
             and self.modelo is not None
@@ -151,22 +296,7 @@ class FineTuningService:
         self.tokenizer = None
         self.modelo = None
         self.modelo_ajustado_carregado = False
-
-        try:
-            caminho_modelo = self._carregar_tokenizer_modelo_base()
-            self.modelo = AutoModelForCausalLM.from_pretrained(
-                caminho_modelo,
-                dtype=torch.float32,
-                local_files_only=True,
-            )
-        except OSError as erro:
-            raise FileNotFoundError(
-                "Modelo base nao encontrado no cache local. Execute: "
-                f"hf download {self.NOME_MODELO_BASE}"
-            ) from erro
-
-        self.modelo.to(self.DISPOSITIVO)
-        self.modelo.eval()
+        self._carregar_modelo_unsloth(para_treino=False)
 
     def gerar_dataframe_fine_tuning(self) -> pd.DataFrame:
         """Le a auditoria, prepara os exemplos e salva o novo arquivo Excel."""
@@ -203,18 +333,13 @@ class FineTuningService:
 
     def _carregar_tokenizer_modelo_base(self) -> Path:
         """Carrega do cache o mesmo tokenizer usado pelo fine-tuning."""
+        caminho_modelo = self._obter_caminho_modelo_base()
         try:
-            caminho_modelo = Path(
-                snapshot_download(
-                    repo_id=self.NOME_MODELO_BASE,
-                    local_files_only=True,
-                )
-            )
             self.tokenizer = AutoTokenizer.from_pretrained(
                 caminho_modelo,
                 local_files_only=True,
             )
-            self.tokenizer.truncation_side = "left"
+            self._configurar_tokenizer()
         except OSError as erro:
             raise FileNotFoundError(
                 "Tokenizer do modelo base nao encontrado no cache local. "
@@ -248,7 +373,6 @@ class FineTuningService:
                 mensagens,
                 tokenize=True,
                 add_generation_prompt=False,
-                enable_thinking=False,
             )
             ids_tokens = (
                 tokens["input_ids"]
@@ -290,7 +414,6 @@ class FineTuningService:
             exemplos = [
                 {
                     "id_exemplo": registro["id_exemplo"],
-                    "chat_template_kwargs": {"enable_thinking": False},
                     "prompt": [
                         {
                             "role": "system",
@@ -319,26 +442,20 @@ class FineTuningService:
         max_novos_tokens: int = 384,
         limite_registros: int | None = LIMITE_REGISTROS_INFERENCIA_TESTE,
     ) -> Path:
-        """Inicia a avaliacao consolidada com as respostas do modelo-base."""
+        """Executa a inferencia-base em uma amostra do split de teste."""
         self.carregar_modelo_base()
-        dataframe_inferencia = self._realizar_inferencia_split_teste(
+        return self._realizar_inferencia_split_teste(
             nome_coluna_resposta="resposta_inferencia_base",
+            caminho_arquivo=self.CAMINHO_ARQUIVO_INFERENCIA_BASE,
             max_novos_tokens=max_novos_tokens,
             limite_registros=limite_registros,
         )
-        return self._salvar_resultado_inferencia(
-            dataframe_inferencia,
-            nome_coluna_resposta="resposta_inferencia_base",
-            iniciar_novo_ciclo=True,
-        )
 
     def realizar_fine_tuning(self, max_passos: int | None = None) -> Path:
-        """Executa o SFT com LoRA e salva o adaptador e as metricas."""
+        """Executa o SFT com Unsloth Fast + QLoRA e salva o adaptador."""
         datasets = self.gerar_datasets_treinamento()
-        self.carregar_modelo_base()
-
-        if self.tokenizer is None or self.modelo is None:
-            raise RuntimeError("O modelo base nao foi carregado corretamente.")
+        if self.tokenizer is None:
+            self._carregar_tokenizer_modelo_base()
 
         estatisticas_tokens = self._calcular_estatisticas_tokens(datasets)
         exemplos_acima_limite = {
@@ -361,6 +478,25 @@ class FineTuningService:
             max_passos=max_passos
         )
 
+        FastLanguageModel = self._importar_fast_language_model()
+        self._fast_language_model = FastLanguageModel
+
+        # Carrega Unsloth Fast em modo treino e aplica LoRA otimizado.
+        self.tokenizer = None
+        self.modelo = None
+        self.modelo_ajustado_carregado = False
+        self._carregar_modelo_unsloth(para_treino=True)
+        self.modelo = FastLanguageModel.get_peft_model(
+            self.modelo,
+            r=configuracao_lora.r,
+            target_modules=list(configuracao_lora.target_modules),
+            lora_alpha=configuracao_lora.lora_alpha,
+            lora_dropout=configuracao_lora.lora_dropout,
+            bias=configuracao_lora.bias,
+            use_gradient_checkpointing="unsloth",
+            random_state=self.SEMENTE_ALEATORIA,
+            max_seq_length=self.max_tokens_entrada,
+        )
         if hasattr(self.modelo, "config"):
             self.modelo.config.use_cache = False
         self.modelo.train()
@@ -371,7 +507,6 @@ class FineTuningService:
             train_dataset=datasets["treino"],
             eval_dataset=datasets["validacao"],
             processing_class=self.tokenizer,
-            peft_config=configuracao_lora,
         )
         parametros_totais = sum(
             parametro.numel() for parametro in treinador.model.parameters()
@@ -438,83 +573,146 @@ class FineTuningService:
         max_novos_tokens: int = 384,
         limite_registros: int | None = LIMITE_REGISTROS_INFERENCIA_TESTE,
     ) -> Path:
-        """Inclui as respostas ajustadas na avaliacao consolidada."""
+        """Executa a inferencia ajustada em uma amostra do split de teste."""
         self._carregar_modelo_ajustado()
-        dataframe_inferencia = self._realizar_inferencia_split_teste(
+        return self._realizar_inferencia_split_teste(
             nome_coluna_resposta="resposta_inferencia_fine_tuning",
+            caminho_arquivo=self.CAMINHO_ARQUIVO_INFERENCIA_FINE_TUNING,
             max_novos_tokens=max_novos_tokens,
             limite_registros=limite_registros,
         )
-        return self._salvar_resultado_inferencia(
-            dataframe_inferencia,
-            nome_coluna_resposta="resposta_inferencia_fine_tuning",
-            iniciar_novo_ciclo=False,
-        )
 
     def comparar_inferencias(self) -> Path:
-        """Valida a avaliacao consolidada contra o split de teste atual."""
-        if not self.CAMINHO_ARQUIVO_AVALIACAO_INFERENCIAS.exists():
-            raise FileNotFoundError(
-                "Arquivo de avaliacao nao encontrado. Execute as inferencias "
-                "base e ajustada antes da comparacao."
-            )
-
-        dataframe_avaliacao = self.servico_arquivo.gerar_dataframe(
-            self.CAMINHO_ARQUIVO_AVALIACAO_INFERENCIAS
-        )
-        dataframe_avaliacao = self._validar_avaliacao_inferencias(
-            dataframe_avaliacao,
-            exigir_respostas=True,
-        )
-
+        """Compara as respostas base e ajustada com a resposta esperada."""
         dataframe_referencia = self._carregar_dataframe_fine_tuning_validado()
         dataframe_referencia = dataframe_referencia.loc[
             dataframe_referencia["split"] == "teste",
-            ["id_exemplo", "split", "system", "user", "assistant"],
+            ["id_exemplo", "system", "user", "assistant"],
         ].rename(columns={"assistant": "resposta_esperada"})
 
+        dataframe_base = self.servico_arquivo.gerar_dataframe(
+            self.CAMINHO_ARQUIVO_INFERENCIA_BASE
+        )
+        dataframe_ajustado = self.servico_arquivo.gerar_dataframe(
+            self.CAMINHO_ARQUIVO_INFERENCIA_FINE_TUNING
+        )
+        dataframe_base = self._validar_relatorio_inferencia(
+            dataframe_base,
+            "resposta_inferencia_base",
+            "inferencia-base",
+        )
+        dataframe_ajustado = self._validar_relatorio_inferencia(
+            dataframe_ajustado,
+            "resposta_inferencia_fine_tuning",
+            "inferencia fine-tuning",
+        )
+
         ids_referencia = set(dataframe_referencia["id_exemplo"])
-        ids_avaliacao = set(dataframe_avaliacao["id_exemplo"])
-        ids_desconhecidos = ids_avaliacao - ids_referencia
+        ids_base = set(dataframe_base["id_exemplo"])
+        ids_ajustado = set(dataframe_ajustado["id_exemplo"])
+        ids_comuns = ids_base & ids_ajustado
+        if not ids_comuns:
+            raise ValueError(
+                "Os relatorios de inferencia base e ajustada nao possuem "
+                "registros em comum."
+            )
+        if ids_base != ids_ajustado:
+            print(
+                "Aviso: relatorios base/ajustada com IDs distintos; "
+                f"usando intersecao de {len(ids_comuns)} registros."
+            )
+            dataframe_base = dataframe_base.loc[
+                dataframe_base["id_exemplo"].isin(ids_comuns)
+            ]
+            dataframe_ajustado = dataframe_ajustado.loc[
+                dataframe_ajustado["id_exemplo"].isin(ids_comuns)
+            ]
+            ids_base = ids_comuns
+        ids_desconhecidos = ids_base - ids_referencia
         if ids_desconhecidos:
             raise ValueError(
-                "A avaliacao possui registros que nao "
+                "Os relatorios de inferencia possuem registros que nao "
                 "pertencem ao split de teste: "
-                + ", ".join(sorted(ids_desconhecidos))
+                + ", ".join(sorted(str(item) for item in ids_desconhecidos))
             )
 
         dataframe_referencia = dataframe_referencia.loc[
-            dataframe_referencia["id_exemplo"].isin(ids_avaliacao)
+            dataframe_referencia["id_exemplo"].isin(ids_base)
         ]
-        validacao = dataframe_avaliacao.merge(
-            dataframe_referencia,
+
+        comparacao = dataframe_referencia.merge(
+            dataframe_base[
+                [
+                    "id_exemplo",
+                    "system",
+                    "user",
+                    "resposta_inferencia_base",
+                ]
+            ],
             on="id_exemplo",
-            how="inner",
+            how="left",
             validate="one_to_one",
-            suffixes=("", "_referencia"),
+            suffixes=("", "_base"),
         )
-        colunas_referencia = ("split", "system", "user", "resposta_esperada")
-        dados_divergentes = pd.Series(False, index=validacao.index)
-        for coluna in colunas_referencia:
-            dados_divergentes |= (
-                validacao[coluna] != validacao[f"{coluna}_referencia"]
-            )
+        comparacao = comparacao.merge(
+            dataframe_ajustado[
+                [
+                    "id_exemplo",
+                    "system",
+                    "user",
+                    "resposta_inferencia_fine_tuning",
+                ]
+            ],
+            on="id_exemplo",
+            how="left",
+            validate="one_to_one",
+            suffixes=("", "_fine_tuning"),
+        )
 
-        if dados_divergentes.any():
+        mensagens_divergentes = (
+            comparacao["system"] != comparacao["system_base"]
+        ) | (comparacao["user"] != comparacao["user_base"])
+        mensagens_divergentes |= (
+            comparacao["system"] != comparacao["system_fine_tuning"]
+        ) | (comparacao["user"] != comparacao["user_fine_tuning"])
+        if mensagens_divergentes.any():
             raise ValueError(
-                "Os dados usados nas inferencias divergem do split de teste atual."
+                "As mensagens usadas nas inferencias divergem do split de teste."
             )
 
-        return self.CAMINHO_ARQUIVO_AVALIACAO_INFERENCIAS
+        comparacao = comparacao[
+            [
+                "id_exemplo",
+                "system",
+                "user",
+                "resposta_esperada",
+                "resposta_inferencia_base",
+                "resposta_inferencia_fine_tuning",
+            ]
+        ].copy()
+        comparacao["avaliacao_estrutura"] = ""
+        comparacao["avaliacao_relevancia_clinica"] = ""
+        comparacao["avaliacao_alucinacao"] = ""
+        comparacao["avaliacao_exposicao_pii"] = ""
+        comparacao["observacoes"] = ""
+
+        return self.servico_arquivo.criar_excel(
+            comparacao,
+            self.CAMINHO_ARQUIVO_COMPARACAO,
+        )
 
     def _carregar_modelo_ajustado(self) -> None:
-        """Carrega o modelo-base e o adaptador LoRA salvo localmente."""
+        """Carrega o modelo-base e o adaptador LoRA conforme a chave configurada."""
         caminho_configuracao = (
             self.CAMINHO_MODELO_FINE_TUNING / "adapter_config.json"
         )
         if not caminho_configuracao.exists():
+            comando = self.MODELOS_DISPONIVEIS[self.chave_modelo][
+                "comando_download"
+            ]
             raise FileNotFoundError(
-                "Adaptador LoRA nao encontrado. Execute o fine-tuning primeiro: "
+                "Adaptador LoRA nao encontrado. Baixe o modelo-base "
+                f"({comando}) e garanta o adaptador em: "
                 f"{self.CAMINHO_MODELO_FINE_TUNING}"
             )
 
@@ -526,41 +724,65 @@ class FineTuningService:
             return
 
         try:
-            caminho_modelo = snapshot_download(
-                repo_id=self.NOME_MODELO_BASE,
-                local_files_only=True,
-            )
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                caminho_modelo,
-                local_files_only=True,
-            )
-            self.tokenizer.truncation_side = "left"
-            modelo_base = AutoModelForCausalLM.from_pretrained(
-                caminho_modelo,
-                dtype=torch.float32,
-                local_files_only=True,
-            )
-            self.modelo = PeftModel.from_pretrained(
-                modelo_base,
-                self.CAMINHO_MODELO_FINE_TUNING,
-                is_trainable=False,
-                local_files_only=True,
-            )
-        except (OSError, ValueError) as erro:
+            if self.loader_modelo == "unsloth":
+                self._carregar_modelo_unsloth(para_treino=False)
+                FastLanguageModel = (
+                    self._fast_language_model
+                    or self._importar_fast_language_model()
+                )
+                self.modelo = PeftModel.from_pretrained(
+                    self.modelo,
+                    self.CAMINHO_MODELO_FINE_TUNING,
+                    is_trainable=False,
+                )
+                FastLanguageModel.for_inference(self.modelo)
+            else:
+                self._carregar_modelo_transformers_peft()
+        except (OSError, ValueError, ImportError) as erro:
             raise RuntimeError(
-                "Nao foi possivel carregar o modelo ajustado localmente."
+                "Nao foi possivel carregar o modelo ajustado localmente. "
+                f"Modelo={self.chave_modelo}."
             ) from erro
 
-        self.modelo.to(self.DISPOSITIVO)
         self.modelo.eval()
         self.modelo_ajustado_carregado = True
+
+    def _carregar_modelo_transformers_peft(self) -> None:
+        """Carrega Qwen (ou similar) via transformers + Peft em GPU/CPU."""
+        if self.DISPOSITIVO != "cuda":
+            raise RuntimeError(
+                "A inferencia do adaptador exige GPU CUDA neste ambiente."
+            )
+        caminho_modelo = self._obter_caminho_modelo_base()
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            caminho_modelo,
+            local_files_only=True,
+        )
+        self._configurar_tokenizer()
+        tipo = (
+            torch.bfloat16
+            if torch.cuda.is_bf16_supported()
+            else torch.float16
+        )
+        modelo_base = AutoModelForCausalLM.from_pretrained(
+            caminho_modelo,
+            torch_dtype=tipo,
+            device_map="auto",
+            local_files_only=True,
+        )
+        self.modelo = PeftModel.from_pretrained(
+            modelo_base,
+            self.CAMINHO_MODELO_FINE_TUNING,
+            is_trainable=False,
+        )
 
     def _realizar_inferencia_split_teste(
         self,
         nome_coluna_resposta: str,
+        caminho_arquivo: Path,
         max_novos_tokens: int,
         limite_registros: int | None,
-    ) -> pd.DataFrame:
+    ) -> Path:
         """Executa a inferencia atual nos registros reservados para teste."""
         if max_novos_tokens <= 0:
             raise ValueError("A quantidade de novos tokens deve ser positiva.")
@@ -593,100 +815,23 @@ class FineTuningService:
                     "split": "teste",
                     "system": registro["system"],
                     "user": registro["user"],
-                    "resposta_esperada": registro["assistant"],
                     nome_coluna_resposta: resposta,
                 }
             )
 
-        return pd.DataFrame(
+        dataframe_inferencia = pd.DataFrame(
             resultados_inferencia,
             columns=(
                 "id_exemplo",
                 "split",
                 "system",
                 "user",
-                "resposta_esperada",
                 nome_coluna_resposta,
             ),
         )
-
-    def _salvar_resultado_inferencia(
-        self,
-        dataframe_inferencia: pd.DataFrame,
-        nome_coluna_resposta: str,
-        iniciar_novo_ciclo: bool,
-    ) -> Path:
-        """Cria ou atualiza o arquivo unico de avaliacao das inferencias."""
-        colunas_respostas = (
-            "resposta_inferencia_base",
-            "resposta_inferencia_fine_tuning",
-        )
-        if nome_coluna_resposta not in colunas_respostas:
-            raise ValueError("Coluna de resposta da inferencia invalida.")
-        if nome_coluna_resposta not in dataframe_inferencia.columns or (
-            dataframe_inferencia[nome_coluna_resposta]
-            .fillna("")
-            .astype(str)
-            .str.strip()
-            .eq("")
-            .any()
-        ):
-            raise ValueError(
-                f"A coluna {nome_coluna_resposta} possui respostas vazias."
-            )
-
-        nova_avaliacao = dataframe_inferencia.copy()
-        for coluna in (*colunas_respostas, *self.COLUNAS_AVALIACAO_MANUAL):
-            if coluna not in nova_avaliacao.columns:
-                nova_avaliacao[coluna] = ""
-        nova_avaliacao = self._validar_avaliacao_inferencias(
-            nova_avaliacao[list(self.COLUNAS_AVALIACAO_INFERENCIAS)],
-            exigir_respostas=False,
-        )
-
-        caminho_avaliacao = self.CAMINHO_ARQUIVO_AVALIACAO_INFERENCIAS
-        if iniciar_novo_ciclo or not caminho_avaliacao.exists():
-            return self.servico_arquivo.criar_excel(
-                nova_avaliacao,
-                caminho_avaliacao,
-            )
-
-        avaliacao_atual = self.servico_arquivo.gerar_dataframe(caminho_avaliacao)
-        avaliacao_atual = self._validar_avaliacao_inferencias(
-            avaliacao_atual,
-            exigir_respostas=False,
-        )
-        ids_atuais = set(avaliacao_atual["id_exemplo"])
-        ids_novos = set(nova_avaliacao["id_exemplo"])
-        if ids_atuais != ids_novos:
-            raise ValueError(
-                "A inferencia ajustada nao possui os mesmos registros da "
-                "inferencia-base. Execute novamente a etapa 7."
-            )
-
-        avaliacao_atual = avaliacao_atual.set_index("id_exemplo")
-        nova_avaliacao = nova_avaliacao.set_index("id_exemplo").loc[
-            avaliacao_atual.index
-        ]
-        for coluna in ("split", "system", "user", "resposta_esperada"):
-            if not avaliacao_atual[coluna].equals(nova_avaliacao[coluna]):
-                raise ValueError(
-                    "Os dados da inferencia ajustada divergem da "
-                    "inferencia-base. Execute novamente a etapa 7."
-                )
-
-        avaliacao_atual[nome_coluna_resposta] = nova_avaliacao[
-            nome_coluna_resposta
-        ]
-        for coluna in self.COLUNAS_AVALIACAO_MANUAL:
-            avaliacao_atual[coluna] = ""
-
-        avaliacao_atual = avaliacao_atual.reset_index()[
-            list(self.COLUNAS_AVALIACAO_INFERENCIAS)
-        ]
-        return self.servico_arquivo.atualizar_excel(
-            avaliacao_atual,
-            caminho_avaliacao,
+        return self.servico_arquivo.criar_excel(
+            dataframe_inferencia,
+            caminho_arquivo,
         )
 
     def _gerar_resposta(
@@ -713,14 +858,15 @@ class FineTuningService:
             mensagens,
             tokenize=False,
             add_generation_prompt=True,
-            enable_thinking=False,
         )
         entradas = self.tokenizer(
             prompt,
             return_tensors="pt",
             truncation=True,
             max_length=self.max_tokens_entrada,
-        ).to(self.DISPOSITIVO)
+        )
+        dispositivo_modelo = next(self.modelo.parameters()).device
+        entradas = entradas.to(dispositivo_modelo)
 
         with torch.inference_mode():
             tokens_gerados = self.modelo.generate(
@@ -728,6 +874,9 @@ class FineTuningService:
                 max_new_tokens=max_novos_tokens,
                 do_sample=False,
                 pad_token_id=self.tokenizer.eos_token_id,
+                repetition_penalty=1.15,
+                no_repeat_ngram_size=4,
+                eos_token_id=self.tokenizer.eos_token_id,
             )
 
         inicio_resposta = entradas["input_ids"].shape[1]
@@ -741,7 +890,7 @@ class FineTuningService:
         """Carrega e valida o dataset preparado antes de qualquer uso."""
         dataframe = self.servico_arquivo.gerar_dataframe(
             self.CAMINHO_ARQUIVO_FINE_TUNING
-        )
+        ).copy()
         colunas_ausentes = [
             coluna
             for coluna in self.COLUNAS_DATASET_FINE_TUNING
@@ -871,7 +1020,6 @@ class FineTuningService:
                     mensagens,
                     tokenize=True,
                     add_generation_prompt=False,
-                    enable_thinking=False,
                 )
                 ids_tokens = (
                     tokens["input_ids"]
@@ -900,14 +1048,15 @@ class FineTuningService:
         return estatisticas
 
     def _criar_configuracao_lora(self) -> LoraConfig:
-        """Cria a configuracao inicial do adaptador LoRA."""
+        """Cria a configuracao inicial do adaptador LoRA (Unsloth Fast)."""
         return LoraConfig(
             task_type="CAUSAL_LM",
             r=self.rank_lora,
             lora_alpha=32,
-            lora_dropout=0.05,
+            # Dropout 0 e o caminho otimizado do Unsloth Fast.
+            lora_dropout=0.0,
             bias="none",
-            target_modules=["q_proj", "v_proj"],
+            target_modules=list(self.MODULOS_LORA),
         )
 
     def _criar_configuracao_treinamento(
@@ -923,9 +1072,9 @@ class FineTuningService:
             learning_rate=1e-4,
             num_train_epochs=self.quantidade_epocas_fine_tuning,
             max_steps=max_passos if max_passos is not None else -1,
-            per_device_train_batch_size=1,
-            per_device_eval_batch_size=1,
-            gradient_accumulation_steps=8,
+            per_device_train_batch_size=self.BATCH_TREINO,
+            gradient_accumulation_steps=self.ACUMULACAO_GRADIENTE,
+            per_device_eval_batch_size=self.BATCH_TREINO,
             eval_strategy="epoch",
             save_strategy="epoch",
             save_total_limit=2,
@@ -933,17 +1082,20 @@ class FineTuningService:
             metric_for_best_model="eval_loss",
             greater_is_better=False,
             logging_strategy="steps",
-            logging_steps=1,
+            logging_steps=10,
             max_length=self.max_tokens_entrada,
+            packing=True,
+            eval_packing=True,
             completion_only_loss=True,
-            seed=self.SEMENTE_ALEATORIA,
-            data_seed=self.SEMENTE_ALEATORIA,
-            use_cpu=self.DISPOSITIVO == "cpu",
-            fp16=False,
-            bf16=False,
-            gradient_checkpointing=False,
-            dataloader_pin_memory=False,
-            optim="adamw_torch",
+            seed=42,
+            data_seed=42,
+            use_cpu=False,
+            fp16=self.DISPOSITIVO == "cuda" and not torch.cuda.is_bf16_supported(),
+            bf16=self.DISPOSITIVO == "cuda" and torch.cuda.is_bf16_supported(),
+            gradient_checkpointing=True,
+            dataloader_pin_memory=self.DISPOSITIVO == "cuda",
+            optim="paged_adamw_8bit",
+            dataloader_num_workers=2,
             report_to="none",
             push_to_hub=False,
         )
@@ -958,11 +1110,15 @@ class FineTuningService:
         """Salva metricas e estatisticas agregadas em um relatorio TXT."""
         linhas = [
             f"modelo_base: {self.NOME_MODELO_BASE}",
-            "metodo: SFT com LoRA",
+            "metodo: SFT com Unsloth Fast + QLoRA (4-bit)",
             f"limite_registros: {self.limite_registros_fine_tuning}",
             f"lora_r: {self.rank_lora}",
             "lora_alpha: 32",
-            "lora_dropout: 0.05",
+            "lora_dropout: 0.0",
+            f"batch: {self.BATCH_TREINO}",
+            f"gradient_accumulation: {self.ACUMULACAO_GRADIENTE}",
+            "packing: True",
+            f"atencao: {self._obter_implementacao_atencao()}",
             "taxa_aprendizado: 0.0001",
             f"epocas: {self.quantidade_epocas_fine_tuning}",
             f"max_tokens: {self.max_tokens_entrada}",
@@ -1300,19 +1456,24 @@ class FineTuningService:
             "configuracao",
             "lora_alpha_dropout",
             valor_base=32,
-            valor_ajustado=0.05,
+            valor_ajustado=0.0,
             interpretacao="Colunas representam alpha e dropout, respectivamente.",
         )
         adicionar_metrica(
             "configuracao",
             "modulos_lora",
-            valor_ajustado="q_proj, v_proj",
+            valor_ajustado=", ".join(self.MODULOS_LORA),
         )
         adicionar_metrica(
             "configuracao",
             "lote_efetivo",
-            valor_ajustado=8,
+            valor_ajustado=self.BATCH_TREINO * self.ACUMULACAO_GRADIENTE,
             unidade="exemplos por atualizacao",
+        )
+        adicionar_metrica(
+            "configuracao",
+            "packing",
+            valor_ajustado=True,
         )
         adicionar_metrica(
             "configuracao",
@@ -1397,68 +1558,58 @@ class FineTuningService:
             self.CAMINHO_RELATORIO_TECNICO,
         )
 
-    def _validar_avaliacao_inferencias(
+    def _validar_relatorio_inferencia(
         self,
         dataframe: pd.DataFrame,
-        exigir_respostas: bool,
+        nome_coluna_resposta: str,
+        nome_relatorio: str,
     ) -> pd.DataFrame:
-        """Valida a estrutura e o conteudo do arquivo unico de avaliacao."""
+        """Valida um relatorio antes de montar a comparacao final."""
         if dataframe.empty:
-            raise ValueError("O arquivo de avaliacao nao possui registros.")
+            raise ValueError(
+                f"O relatorio de {nome_relatorio} nao possui registros."
+            )
 
+        colunas_necessarias = (
+            "id_exemplo",
+            "system",
+            "user",
+            nome_coluna_resposta,
+        )
         colunas_ausentes = [
             coluna
-            for coluna in self.COLUNAS_AVALIACAO_INFERENCIAS
+            for coluna in colunas_necessarias
             if coluna not in dataframe.columns
         ]
         if colunas_ausentes:
             raise ValueError(
-                "Colunas ausentes no arquivo de avaliacao: "
+                f"Colunas ausentes no relatorio de {nome_relatorio}: "
                 + ", ".join(colunas_ausentes)
             )
 
-        dataframe = dataframe[list(self.COLUNAS_AVALIACAO_INFERENCIAS)].copy()
+        dataframe = dataframe.copy()
         dataframe["id_exemplo"] = dataframe["id_exemplo"].map(
             self._normalizar_identificador
         )
         if (dataframe["id_exemplo"] == "").any():
-            raise ValueError("Identificador vazio no arquivo de avaliacao.")
-        if dataframe["id_exemplo"].duplicated().any():
-            raise ValueError("Identificadores repetidos no arquivo de avaliacao.")
-
-        dataframe["split"] = (
-            dataframe["split"].fillna("").astype(str).str.strip().str.casefold()
-        )
-        if not dataframe["split"].eq("teste").all():
             raise ValueError(
-                "O arquivo de avaliacao deve conter apenas registros de teste."
+                f"Identificador vazio no relatorio de {nome_relatorio}."
+            )
+        if dataframe["id_exemplo"].duplicated().any():
+            raise ValueError(
+                f"Identificadores repetidos no relatorio de {nome_relatorio}."
             )
 
-        for coluna in ("system", "user", "resposta_esperada"):
+        for coluna in ("system", "user", nome_coluna_resposta):
             mascara_vazia = dataframe[coluna].isna() | (
                 dataframe[coluna].astype(str).str.strip() == ""
             )
             if mascara_vazia.any():
                 raise ValueError(
-                    f"Valores vazios na coluna {coluna} do arquivo de avaliacao."
+                    f"Valores vazios na coluna {coluna} do relatorio de "
+                    f"{nome_relatorio}."
                 )
             dataframe[coluna] = dataframe[coluna].astype(str).str.strip()
-
-        colunas_respostas = (
-            "resposta_inferencia_base",
-            "resposta_inferencia_fine_tuning",
-        )
-        for coluna in colunas_respostas:
-            dataframe[coluna] = dataframe[coluna].fillna("").astype(str).str.strip()
-            if exigir_respostas and dataframe[coluna].eq("").any():
-                raise ValueError(
-                    f"Valores vazios na coluna {coluna}. Execute as etapas "
-                    "7 e 9 antes da comparacao."
-                )
-
-        for coluna in self.COLUNAS_AVALIACAO_MANUAL:
-            dataframe[coluna] = dataframe[coluna].fillna("")
-
         return dataframe
 
     @staticmethod
