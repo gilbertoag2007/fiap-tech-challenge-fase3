@@ -451,6 +451,20 @@ class FineTuningService:
             iniciar_novo_ciclo=False,
         )
 
+    def gerar_resposta_modelo_ajustado(
+        self,
+        mensagem_system: str,
+        mensagem_usuario: str,
+        max_novos_tokens: int = 384,
+    ) -> str:
+        """Gera uma resposta usando o adaptador LoRA local já treinado."""
+        self._carregar_modelo_ajustado()
+        return self._gerar_resposta(
+            mensagem_system=mensagem_system,
+            mensagem_usuario=mensagem_usuario,
+            max_novos_tokens=max_novos_tokens,
+        )
+
     def comparar_inferencias(self) -> Path:
         """Valida a avaliacao consolidada contra o split de teste atual."""
         if not self.CAMINHO_ARQUIVO_AVALIACAO_INFERENCIAS.exists():
