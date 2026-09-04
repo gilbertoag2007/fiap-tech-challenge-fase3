@@ -62,6 +62,10 @@ class RepositorioProntuariosExcel:
 
         linha = correspondencias.iloc[0]
         campos = self._extrair_campos_permitidos(linha)
+        if "prontuario_contexto_anonimizado" not in campos:
+            raise ValueError(
+                "O campo obrigatório prontuario_contexto_anonimizado não pode estar vazio."
+            )
         return RegistroClinico(
             id_registro=identificador_normalizado,
             campos=campos,

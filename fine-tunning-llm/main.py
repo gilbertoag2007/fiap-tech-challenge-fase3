@@ -563,10 +563,16 @@ def executar_etapa_11(fluxo_assistente: FluxoAssistenteMedico) -> None:
     alertas = ", ".join(revisao.alertas) or "Nenhum alerta."
     CONSOLE.print(
         Panel(
-            f"Rascunho:\n{revisao.rascunho}\n\n"
-            f"Fontes: {fontes}\n"
-            f"Alertas: {alertas}\n"
-            f"Aviso: {revisao.aviso}",
+            Text.assemble(
+                "Rascunho:\n",
+                Text(revisao.rascunho),
+                "\n\nFontes: ",
+                fontes,
+                "\nAlertas: ",
+                alertas,
+                "\nAviso: ",
+                revisao.aviso,
+            ),
             title="Revisão humana obrigatória",
             border_style="yellow",
         )
@@ -592,9 +598,14 @@ def executar_etapa_11(fluxo_assistente: FluxoAssistenteMedico) -> None:
         fontes = ", ".join(resposta.fontes) or "Nenhuma fonte informada."
         CONSOLE.print(
             Panel(
-                f"Resposta:\n{resposta.resposta}\n\n"
-                f"Fontes: {fontes}\n"
-                f"Aviso: {resposta.aviso}",
+                Text.assemble(
+                    "Resposta:\n",
+                    Text(resposta.resposta or ""),
+                    "\n\nFontes: ",
+                    fontes,
+                    "\nAviso: ",
+                    resposta.aviso,
+                ),
                 title="Resposta aprovada",
                 border_style="green",
             )
