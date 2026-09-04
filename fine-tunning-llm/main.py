@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import pandas as pd
 from rich import box
@@ -28,6 +28,66 @@ from app.services.qualidade_service import QualidadeService
 if TYPE_CHECKING:
     from app.services.fine_tuning_service import FineTuningService
     from app.services.pii_service import PiiService
+else:
+    class ResultadoIdentificacaoPii(Protocol):
+        """Resultado produzido pela identificação e anonimização de PII."""
+
+        dataframe_resultado: pd.DataFrame
+        caminho_arquivo_tratado: Path | None
+
+    class FineTuningService(Protocol):
+        """Contrato leve dos recursos de fine-tuning consumidos pelo menu."""
+
+        NOME_MODELO_BASE: str
+        CAMINHO_ARQUIVO_FINE_TUNING: Path
+        CAMINHO_RELATORIO_METRICAS: Path
+        CAMINHO_RELATORIO_TECNICO: Path
+        limite_registros_fine_tuning: int | None
+        quantidade_epocas_fine_tuning: int
+        max_tokens_entrada: int
+        rank_lora: int
+
+        def gerar_dataframe_fine_tuning(self) -> pd.DataFrame:
+            """Prepara o dataframe usado no fine-tuning."""
+
+        def realizar_inferencia_base(
+            self,
+            max_novos_tokens: int = 384,
+            limite_registros: int | None = 3,
+        ) -> Path:
+            """Executa a inferência do modelo-base."""
+
+        def realizar_fine_tuning(self, max_passos: int | None = None) -> Path:
+            """Executa o treinamento supervisionado."""
+
+        def realizar_inferencia_fine_tuning(
+            self,
+            max_novos_tokens: int = 384,
+            limite_registros: int | None = 3,
+        ) -> Path:
+            """Executa a inferência com o modelo ajustado."""
+
+        def gerar_resposta_modelo_ajustado(
+            self,
+            mensagem_system: str,
+            mensagem_usuario: str,
+            max_novos_tokens: int = 384,
+        ) -> str:
+            """Gera uma resposta local com o adaptador LoRA."""
+
+        def comparar_inferencias(self) -> Path:
+            """Valida e persiste a comparação entre inferências."""
+
+    class PiiService(Protocol):
+        """Contrato leve do serviço de PII consumido pelo menu."""
+
+        def identificar_e_tratar_pii(
+            self,
+            dataframe: pd.DataFrame,
+            colunas_analisar: list[str],
+            caminho_arquivo_tratado: Path | None = None,
+        ) -> ResultadoIdentificacaoPii:
+            """Identifica e anonimiza PII no dataframe informado."""
 
 
 # Colunas do arquivo analisadas na identificação de PII.
