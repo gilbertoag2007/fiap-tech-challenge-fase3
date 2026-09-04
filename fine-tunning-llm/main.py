@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
+from typing import TYPE_CHECKING
 
 import pandas as pd
 from rich import box
@@ -9,10 +12,22 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from app.services.arquivo_service import ArquivoService
-from app.services.fine_tuning_service import FineTuningService
-from app.services.pii_service import PiiService
-from app.services.qualidade_service import QualidadeService
+from app.assistente.auditoria import ServicoAuditoriaAssistente
+from app.assistente.chain import AssistenteChain
+from app.assistente.fluxo import FluxoAssistenteMedico
+from app.assistente.modelo_chat import ModeloChatQwenLocal
+from app.assistente.modelos import DecisaoHumana, SolicitacaoAssistente
+from app.assistente.repositorio import (
+    RegistroDuplicadoError,
+    RegistroNaoEncontradoError,
+    RepositorioProntuariosExcel,
+)
+
+if TYPE_CHECKING:
+    from app.services.arquivo_service import ArquivoService
+    from app.services.fine_tuning_service import FineTuningService
+    from app.services.pii_service import PiiService
+    from app.services.qualidade_service import QualidadeService
 
 
 """ Colunas do arquivo a serem analisadas para verificar existencia de PII """
@@ -65,7 +80,8 @@ GRUPOS_MENU: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "bright_magenta",
         ("7", "8", "9", "10"),
     ),
-    (f"{obter_icone('⚙', '--')} SISTEMA", "bright_black", ("11",)),
+    (f"{obter_icone('🩺', '+')} ASSISTENTE MÉDICO", "bright_green", ("11",)),
+    (f"{obter_icone('⚙', '--')} SISTEMA", "bright_black", ("12",)),
 )
 
 ICONES_MENU: dict[str, str] = {
@@ -80,7 +96,8 @@ ICONES_MENU: dict[str, str] = {
     "8": obter_icone("🛠", "*"),
     "9": obter_icone("✨", "*"),
     "10": obter_icone("📊", "%"),
-    "11": obter_icone("👋", "<"),
+    "11": obter_icone("🩺", "+"),
+    "12": obter_icone("👋", "<"),
 }
 
 
@@ -153,7 +170,8 @@ def exibir_menu(
         "8": "[blue]sob demanda[/blue]",
         "9": "[blue]sob demanda[/blue]",
         "10": "[blue]sob demanda[/blue]",
-        "11": "[bright_black]encerrar[/bright_black]",
+        "11": "[green]revisão humana[/green]",
+        "12": "[bright_black]encerrar[/bright_black]",
     }
 
     for indice_grupo, (nome_grupo, cor_grupo, opcoes_grupo) in enumerate(GRUPOS_MENU):
@@ -426,8 +444,64 @@ def executar_etapa_10(servico_fine_tuning: FineTuningService) -> Path:
     return caminho_relatorio
 
 
+def executar_etapa_11(fluxo_assistente: FluxoAssistenteMedico) -> None:
+    """Gera um rascunho e exige revisão humana antes da liberação."""
+    id_registro = CONSOLE.input("Informe o identificador do registro: ").strip()
+    pergunta_clinica = CONSOLE.input("Informe a pergunta clínica: ").strip()
+    solicitacao = SolicitacaoAssistente(
+        id_registro=id_registro,
+        pergunta_clinica=pergunta_clinica,
+    )
+    revisao = fluxo_assistente.iniciar(solicitacao)
+    fontes = ", ".join(revisao.fontes) or "Nenhuma fonte informada."
+    alertas = ", ".join(revisao.alertas) or "Nenhum alerta."
+    CONSOLE.print(
+        Panel(
+            f"Rascunho:\n{revisao.rascunho}\n\n"
+            f"Fontes: {fontes}\n"
+            f"Alertas: {alertas}\n"
+            f"Aviso: {revisao.aviso}",
+            title="Revisão humana obrigatória",
+            border_style="yellow",
+        )
+    )
+
+    while True:
+        decisao_informada = CONSOLE.input(
+            "Aprovar o rascunho? (s/n): "
+        ).strip().lower()
+        if decisao_informada in {"s", "n"}:
+            break
+        CONSOLE.print("Decisão inválida. Informe apenas 's' ou 'n'.")
+
+    observacao = CONSOLE.input("Observação da revisão (opcional): ").strip()
+    resposta = fluxo_assistente.retomar(
+        revisao.id_execucao,
+        DecisaoHumana(
+            aprovado=decisao_informada == "s",
+            observacao=observacao,
+        ),
+    )
+    if resposta.situacao == "aprovada":
+        fontes = ", ".join(resposta.fontes) or "Nenhuma fonte informada."
+        CONSOLE.print(
+            Panel(
+                f"Resposta:\n{resposta.resposta}\n\n"
+                f"Fontes: {fontes}\n"
+                f"Aviso: {resposta.aviso}",
+                title="Resposta aprovada",
+                border_style="green",
+            )
+        )
+        return
+
+    CONSOLE.print("Rascunho rejeitado. Nenhum conteúdo foi liberado.")
+
+
 def solicitar_percentual_registros() -> float:
     """Solicita uma única vez o percentual usado em toda a execução."""
+    from app.services.arquivo_service import ArquivoService
+
     while True:
         valor_informado = CONSOLE.input(
             "[bold cyan]Informe o percentual de registros que será utilizado "
@@ -445,6 +519,11 @@ def solicitar_percentual_registros() -> float:
 
 
 def main(percentual_registros: float | None = None) -> None:
+    from app.services.arquivo_service import ArquivoService
+    from app.services.fine_tuning_service import FineTuningService
+    from app.services.pii_service import PiiService
+    from app.services.qualidade_service import QualidadeService
+
     if percentual_registros is None:
         percentual_registros = solicitar_percentual_registros()
     else:
@@ -464,6 +543,22 @@ def main(percentual_registros: float | None = None) -> None:
         rank_lora=RANK_LORA_FINE_TUNING,
         max_tokens_entrada=MAX_TOKENS_ENTRADA_FINE_TUNING,
     )
+    repositorio_prontuarios = RepositorioProntuariosExcel(
+        servico_arquivo=servico_arquivos,
+        caminho_arquivo=caminho_arquivo_auditoria,
+    )
+    modelo_assistente = ModeloChatQwenLocal(
+        servico_fine_tuning=servico_fine_tuning,
+    )
+    chain_assistente = AssistenteChain(modelo_assistente)
+    auditoria_assistente = ServicoAuditoriaAssistente(
+        caminho_arquivo=Path("app/data/relatorios/auditoria_assistente.jsonl")
+    )
+    fluxo_assistente = FluxoAssistenteMedico(
+        repositorio=repositorio_prontuarios,
+        chain_assistente=chain_assistente,
+        auditoria=auditoria_assistente,
+    )
     dataframe_original = None
     dataframe_auditoria = None
     dataframe_fine_tuning = None
@@ -480,7 +575,8 @@ def main(percentual_registros: float | None = None) -> None:
         "8": "Executar fine-tuning com LoRA",
         "9": "Executar inferência após fine-tuning",
         "10": "Comparar inferências",
-        "11": "Sair",
+        "11": "Consultar assistente médico com revisão humana",
+        "12": "Sair",
     }
 
     while True:
@@ -498,7 +594,7 @@ def main(percentual_registros: float | None = None) -> None:
             "[/bold bright_cyan]"
         ).strip()
 
-        if opcao_escolhida == "11":
+        if opcao_escolhida == "12":
             CONSOLE.print(
                 f"\n[bold green]{obter_icone('👋', '<')} Programa encerrado. "
                 "Até a próxima![/bold green]"
@@ -640,6 +736,19 @@ def main(percentual_registros: float | None = None) -> None:
 
         if opcao_escolhida == "10":
             executar_etapa_10(servico_fine_tuning)
+            continue
+
+        if opcao_escolhida == "11":
+            try:
+                executar_etapa_11(fluxo_assistente)
+            except (
+                ValueError,
+                RegistroNaoEncontradoError,
+                RegistroDuplicadoError,
+                FileNotFoundError,
+                RuntimeError,
+            ) as erro:
+                CONSOLE.print(f"Não foi possível executar o assistente: {erro}")
             continue
 
 
