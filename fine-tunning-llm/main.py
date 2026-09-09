@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import pandas as pd
 from rich import box
@@ -12,12 +12,82 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from app.assistente.auditoria import ServicoAuditoriaAssistente
+from app.assistente.chain import AssistenteChain
+from app.assistente.fluxo import FluxoAssistenteMedico
+from app.assistente.modelo_chat import ModeloChatQwenLocal
+from app.assistente.modelos import DecisaoHumana, SolicitacaoAssistente
+from app.assistente.repositorio import (
+    RegistroDuplicadoError,
+    RegistroNaoEncontradoError,
+    RepositorioProntuariosExcel,
+)
 from app.services.arquivo_service import ArquivoService
 from app.services.qualidade_service import QualidadeService
 
 if TYPE_CHECKING:
     from app.services.fine_tuning_service import FineTuningService
     from app.services.pii_service import PiiService
+else:
+    class ResultadoIdentificacaoPii(Protocol):
+        """Resultado produzido pela identificação e anonimização de PII."""
+
+        dataframe_resultado: pd.DataFrame
+        caminho_arquivo_tratado: Path | None
+
+    class FineTuningService(Protocol):
+        """Contrato leve dos recursos de fine-tuning consumidos pelo menu."""
+
+        NOME_MODELO_BASE: str
+        CAMINHO_ARQUIVO_FINE_TUNING: Path
+        CAMINHO_RELATORIO_METRICAS: Path
+        CAMINHO_RELATORIO_TECNICO: Path
+        limite_registros_fine_tuning: int | None
+        quantidade_epocas_fine_tuning: int
+        max_tokens_entrada: int
+        rank_lora: int
+
+        def gerar_dataframe_fine_tuning(self) -> pd.DataFrame:
+            """Prepara o dataframe usado no fine-tuning."""
+
+        def realizar_inferencia_base(
+            self,
+            max_novos_tokens: int = 384,
+            limite_registros: int | None = 3,
+        ) -> Path:
+            """Executa a inferência do modelo-base."""
+
+        def realizar_fine_tuning(self, max_passos: int | None = None) -> Path:
+            """Executa o treinamento supervisionado."""
+
+        def realizar_inferencia_fine_tuning(
+            self,
+            max_novos_tokens: int = 384,
+            limite_registros: int | None = 3,
+        ) -> Path:
+            """Executa a inferência com o modelo ajustado."""
+
+        def gerar_resposta_modelo_ajustado(
+            self,
+            mensagem_system: str,
+            mensagem_usuario: str,
+            max_novos_tokens: int = 384,
+        ) -> str:
+            """Gera uma resposta local com o adaptador LoRA."""
+
+        def comparar_inferencias(self) -> Path:
+            """Valida e persiste a comparação entre inferências."""
+
+    class PiiService(Protocol):
+        """Contrato leve do serviço de PII consumido pelo menu."""
+
+        def identificar_e_tratar_pii(
+            self,
+            dataframe: pd.DataFrame,
+            colunas_analisar: list[str],
+            caminho_arquivo_tratado: Path | None = None,
+        ) -> ResultadoIdentificacaoPii:
+            """Identifica e anonimiza PII no dataframe informado."""
 
 
 # Colunas do arquivo analisadas na identificação de PII.
@@ -61,7 +131,8 @@ GRUPOS_MENU: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "bright_magenta",
         ("7", "8", "9", "10"),
     ),
-    (f"{obter_icone('⚙', '--')} SISTEMA", "bright_black", ("11",)),
+    (f"{obter_icone('🩺', '+')} ASSISTENTE MÉDICO", "bright_green", ("11",)),
+    (f"{obter_icone('⚙', '--')} SISTEMA", "bright_black", ("12",)),
 )
 
 ICONES_MENU: dict[str, str] = {
@@ -76,7 +147,8 @@ ICONES_MENU: dict[str, str] = {
     "8": obter_icone("🛠", "*"),
     "9": obter_icone("✨", "*"),
     "10": obter_icone("📊", "%"),
-    "11": obter_icone("👋", "<"),
+    "11": obter_icone("🩺", "+"),
+    "12": obter_icone("👋", "<"),
 }
 
 OPCOES_MENU: dict[str, str] = {
@@ -91,7 +163,8 @@ OPCOES_MENU: dict[str, str] = {
     "8": "Executar fine-tuning com LoRA",
     "9": "Executar inferência após fine-tuning",
     "10": "Comparar inferências",
-    "11": "Sair",
+    "11": "Consultar assistente médico com revisão humana",
+    "12": "Sair",
 }
 
 ETAPAS_POR_ATALHO: dict[str, tuple[str, ...]] = {
@@ -168,7 +241,8 @@ def exibir_menu(
         "8": "[blue]sob demanda[/blue]",
         "9": "[blue]sob demanda[/blue]",
         "10": "[blue]sob demanda[/blue]",
-        "11": "[bright_black]encerrar[/bright_black]",
+        "11": "[green]revisão humana[/green]",
+        "12": "[bright_black]encerrar[/bright_black]",
     }
 
     for indice_grupo, (nome_grupo, cor_grupo, opcoes_grupo) in enumerate(GRUPOS_MENU):
@@ -444,6 +518,71 @@ def executar_etapa_10(servico_fine_tuning: FineTuningService) -> Path:
     return caminho_relatorio
 
 
+def executar_etapa_11(fluxo_assistente: FluxoAssistenteMedico) -> None:
+    """Gera um rascunho e exige revisão humana antes da liberação."""
+    id_registro = CONSOLE.input("Informe o identificador do registro: ").strip()
+    pergunta_clinica = CONSOLE.input("Informe a pergunta clínica: ").strip()
+    solicitacao = SolicitacaoAssistente(
+        id_registro=id_registro,
+        pergunta_clinica=pergunta_clinica,
+    )
+    revisao = fluxo_assistente.iniciar(solicitacao)
+    fontes = ", ".join(revisao.fontes) or "Nenhuma fonte informada."
+    alertas = ", ".join(revisao.alertas) or "Nenhum alerta."
+    CONSOLE.print(
+        Panel(
+            Text.assemble(
+                "Rascunho:\n",
+                Text(revisao.rascunho),
+                "\n\nFontes: ",
+                fontes,
+                "\nAlertas: ",
+                alertas,
+                "\nAviso: ",
+                revisao.aviso,
+            ),
+            title="Revisão humana obrigatória",
+            border_style="yellow",
+        )
+    )
+
+    while True:
+        decisao_informada = CONSOLE.input(
+            "Aprovar o rascunho? (s/n): "
+        ).strip().lower()
+        if decisao_informada in {"s", "n"}:
+            break
+        CONSOLE.print("Decisão inválida. Informe apenas 's' ou 'n'.")
+
+    observacao = CONSOLE.input("Observação da revisão (opcional): ").strip()
+    resposta = fluxo_assistente.retomar(
+        revisao.id_execucao,
+        DecisaoHumana(
+            aprovado=decisao_informada == "s",
+            observacao=observacao,
+        ),
+    )
+    if resposta.situacao == "aprovada":
+        fontes = ", ".join(resposta.fontes) or "Nenhuma fonte informada."
+        CONSOLE.print(
+            Panel(
+                Text.assemble(
+                    "Resposta:\n",
+                    Text(resposta.resposta or ""),
+                    "\n\nFontes: ",
+                    fontes,
+                    "\nAviso: ",
+                    resposta.aviso,
+                ),
+                title="Resposta aprovada",
+                border_style="green",
+            )
+        )
+        return
+
+    CONSOLE.print("Rascunho rejeitado. Nenhum conteúdo foi liberado.")
+
+
 def solicitar_percentual_registros() -> float:
     """Solicita uma única vez o percentual usado em toda a execução."""
     while True:
@@ -480,6 +619,7 @@ def main(percentual_registros: float | None = None) -> None:
     servico_qualidade = QualidadeService(servico_arquivo=servico_arquivos)
     servico_pii: PiiService | None = None
     servico_fine_tuning: FineTuningService | None = None
+    fluxo_assistente: FluxoAssistenteMedico | None = None
     dataframe_original: pd.DataFrame | None = None
     dataframe_auditoria: pd.DataFrame | None = None
     fine_tuning_preparado = False
@@ -497,7 +637,7 @@ def main(percentual_registros: float | None = None) -> None:
             "[/bold bright_cyan]"
         ).strip()
 
-        if opcao_escolhida == "11":
+        if opcao_escolhida == "12":
             CONSOLE.print(
                 f"\n[bold green]{obter_icone('👋', '<')} Programa encerrado. "
                 "Até a próxima![/bold green]"
@@ -604,6 +744,44 @@ def main(percentual_registros: float | None = None) -> None:
                     executar_etapa_9(servico_fine_tuning)
                 else:
                     executar_etapa_10(servico_fine_tuning)
+
+        if opcao_escolhida == "11":
+            try:
+                if servico_fine_tuning is None:
+                    from app.services.fine_tuning_service import FineTuningService
+
+                    servico_fine_tuning = FineTuningService(
+                        servico_arquivo=servico_arquivos
+                    )
+                if fluxo_assistente is None:
+                    repositorio_prontuarios = RepositorioProntuariosExcel(
+                        servico_arquivo=servico_arquivos,
+                        caminho_arquivo=caminho_arquivo_auditoria,
+                    )
+                    modelo_assistente = ModeloChatQwenLocal(
+                        servico_fine_tuning=servico_fine_tuning,
+                    )
+                    chain_assistente = AssistenteChain(modelo_assistente)
+                    auditoria_assistente = ServicoAuditoriaAssistente(
+                        caminho_arquivo=Path(
+                            "app/data/relatorios/auditoria_assistente.jsonl"
+                        )
+                    )
+                    fluxo_assistente = FluxoAssistenteMedico(
+                        repositorio=repositorio_prontuarios,
+                        chain_assistente=chain_assistente,
+                        auditoria=auditoria_assistente,
+                    )
+                executar_etapa_11(fluxo_assistente)
+            except (
+                ValueError,
+                RegistroNaoEncontradoError,
+                RegistroDuplicadoError,
+                FileNotFoundError,
+                RuntimeError,
+            ) as erro:
+                CONSOLE.print(f"Não foi possível executar o assistente: {erro}")
+            continue
 
 
 if __name__ == "__main__":

@@ -206,6 +206,12 @@ tempCodeRunnerFile.py
 # Ruff stuff:
 .ruff_cache/
 
+# Worktrees locais usados para desenvolver branches isoladas.
+.worktrees/
+
+# Artefatos locais de planejamento do Superpowers.
+/docs/superpowers/
+
 # PyPI configuration file
 .pypirc
 
