@@ -531,17 +531,27 @@ def executar_etapa_11(
 
     while True:
         decisao_informada = CONSOLE.input(
-            "Aprovar o rascunho? (s/n): "
+            "Revisão HITL — aprovar, rejeitar ou editar? (a/r/e): "
         ).strip().lower()
-        if decisao_informada in {"s", "n"}:
+        if decisao_informada in {"a", "r", "e"}:
             break
-        CONSOLE.print("Decisão inválida. Informe apenas 's' ou 'n'.")
+        CONSOLE.print("Decisão inválida. Informe apenas 'a', 'r' ou 'e'.")
 
+    texto_revisado = None
+    if decisao_informada == "e":
+        texto_revisado = CONSOLE.input(
+            "Informe a resposta revisada em uma linha: "
+        ).strip()
     observacao = CONSOLE.input("Observação da revisão (opcional): ").strip()
     resposta = fluxo_assistente.retomar(
         revisao.id_execucao,
         DecisaoHumana(
-            aprovado=decisao_informada == "s",
+            acao={
+                "a": "aprovar",
+                "r": "rejeitar",
+                "e": "editar",
+            }[decisao_informada],
+            texto_revisado=texto_revisado,
             observacao=observacao,
         ),
     )

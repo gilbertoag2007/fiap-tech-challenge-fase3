@@ -20,7 +20,10 @@ class ArquivoService:
         if not caminho_arquivo.exists():
             raise FileNotFoundError(f"Arquivo não encontrado: {caminho_arquivo}")
 
-        dataframe = pd.read_excel(caminho_arquivo)
+        if caminho_arquivo.suffix.lower() == ".csv":
+            dataframe = pd.read_csv(caminho_arquivo)
+        else:
+            dataframe = pd.read_excel(caminho_arquivo)
         return self.selecionar_percentual_registros(
             dataframe,
             percentual_registros,

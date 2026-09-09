@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated, Literal, TypedDict
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 
 TextoObrigatorio = Annotated[
@@ -43,8 +43,26 @@ class RegistroClinico(ModeloImutavel):
 class DecisaoHumana(ModeloImutavel):
     """Decisão obtida na etapa obrigatória de revisão humana."""
 
-    aprovado: bool
+    acao: Literal["aprovar", "rejeitar", "editar"] | None = None
+    aprovado: bool | None = None
+    texto_revisado: str | None = None
     observacao: str = ""
+
+    @model_validator(mode="after")
+    def validar_decisao(self) -> "DecisaoHumana":
+        """Aceita o contrato novo e mantém compatibilidade com o CLI antigo."""
+        if self.acao is None and self.aprovado is None:
+            raise ValueError("Informe a ação da revisão humana.")
+        acao = self.acao_efetiva
+        if acao == "editar" and not (self.texto_revisado or "").strip():
+            raise ValueError("O texto revisado é obrigatório ao editar.")
+        return self
+
+    @property
+    def acao_efetiva(self) -> Literal["aprovar", "rejeitar", "editar"]:
+        if self.acao is not None:
+            return self.acao
+        return "aprovar" if self.aprovado else "rejeitar"
 
 
 class RevisaoPendente(ModeloImutavel):
@@ -83,6 +101,8 @@ class EstadoAssistente(TypedDict, total=False):
     alertas: list[str]
     aviso: str
     decisao_humana: bool
+    acao_humana: Literal["aprovar", "rejeitar", "editar"]
     observacao_humana: str
+    texto_revisado: str
     situacao: Literal["aprovada", "rejeitada"]
     resposta: str | None

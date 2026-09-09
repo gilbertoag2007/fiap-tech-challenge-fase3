@@ -1,0 +1,44 @@
+# Stack completa do Tech Challenge - Fase 3 (backend FastAPI + frontend React).
+# Executar a partir da raiz do repositorio:
+#   docker compose up --build
+services:
+  backend:
+    build:
+      context: ./fine-tunning-llm
+      dockerfile: Dockerfile.backend
+    env_file:
+      - path: ./fine-tunning-llm/.env
+        required: false
+    environment:
+      APP_DATA_DIR: /data
+      APP_MODELS_DIR: /models
+      APP_DEFAULT_MODEL: ${APP_DEFAULT_MODEL:-qwen10}
+      HF_HOME: /cache/huggingface
+      HF_TOKEN: ${HF_TOKEN:-}
+      HF_NAMESPACE: ${HF_NAMESPACE:-Hist3ry}
+      HF_REPO_LLAMA: ${HF_REPO_LLAMA:-Hist3ry/fiap-medpt-llama31-8b-qlora}
+      HF_REPO_QWEN80: ${HF_REPO_QWEN80:-Hist3ry/fiap-medpt-qwen3-06b-lora-80pct-qkvo}
+      APP_CORS_ORIGINS: http://localhost:8080
+    volumes:
+      - hf-cache:/cache/huggingface
+      - adapters:/models
+      - ./fine-tunning-llm/app/data/processado:/data/processado:ro
+      - ./fine-tunning-llm/app/data/relatorios:/data/relatorios
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./fine-tunning-llm
+      dockerfile: Dockerfile.frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+
+volumes:
+  hf-cache:
+  adapters:

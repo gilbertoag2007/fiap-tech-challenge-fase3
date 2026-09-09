@@ -1,0 +1,67 @@
+Metricas do fine-tuning
+modelo_base: unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit
+metodo: SFT com Unsloth Fast + QLoRA (4-bit)
+limite_registros: None
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.0
+batch: 2
+gradient_accumulation: 4
+packing: True
+atencao: sdpa
+taxa_aprendizado: 0.0001
+epocas: 3
+max_tokens: 512
+
+Metricas de treinamento:
+epoch: 3.0
+melhor_perda_validacao: 0.42463138699531555
+parametros_totais: 4554231808
+parametros_treinaveis: 13631488
+passos_treinamento: 2598
+percentual_parametros_treinaveis: 0.2993147598691577
+total_flos: 4.3328631657148416e+17
+train_loss: 0.4582368876954241
+train_runtime: 9125.7101
+train_samples_per_second: 2.275
+train_steps_per_second: 0.285
+
+Metricas de validacao antes do fine-tuning:
+epoch: 0
+eval_loss: 1.752440333366394
+eval_model_preparation_time: 0.0105
+eval_runtime: 125.9046
+eval_samples_per_second: 6.87
+eval_steps_per_second: 3.439
+
+Metricas de validacao:
+epoch: 3.0
+eval_loss: 0.42463138699531555
+eval_model_preparation_time: 0.0105
+eval_runtime: 125.0685
+eval_samples_per_second: 6.916
+eval_steps_per_second: 3.462
+perplexidade: 1.5290266966470505
+
+Estatisticas de tokens:
+[treino]
+exemplos_acima_limite: 0
+quantidade_exemplos: 6921
+tokens_maximos: 511
+tokens_mediana: 463.0
+tokens_minimos: 389
+tokens_percentil_95: 506
+[validacao]
+exemplos_acima_limite: 0
+quantidade_exemplos: 865
+tokens_maximos: 511
+tokens_mediana: 462.0
+tokens_minimos: 392
+tokens_percentil_95: 505
+[teste]
+exemplos_acima_limite: 0
+quantidade_exemplos: 865
+tokens_maximos: 511
+tokens_mediana: 465.0
+tokens_minimos: 393
+tokens_percentil_95: 506

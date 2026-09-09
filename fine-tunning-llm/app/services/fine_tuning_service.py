@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import gc
+import threading
 from datetime import datetime
 from math import ceil, exp, isfinite
 from pathlib import Path
 from statistics import median
 from typing import Any
-import unsloth
-from unsloth import FastLanguageModel
+
 import pandas as pd
 import torch
 from datasets import Dataset, DatasetDict
@@ -20,6 +21,12 @@ from transformers import (
 )
 from trl import SFTConfig, SFTTrainer
 
+from app.config import (
+    DIRETORIO_MODELOS,
+    HF_REPO_LLAMA,
+    HF_REPO_QWEN80,
+    MODELO_PADRAO,
+)
 from app.services.arquivo_service import ArquivoService
 
 
@@ -39,30 +46,32 @@ class FineTuningService:
     MODULOS_LORA = ("q_proj", "k_proj", "v_proj", "o_proj")
     MODELOS_DISPONIVEIS = {
         "llama": {
-            "rotulo": "Llama 3.1 8B Instruct QLoRA",
+            "rotulo": "Llama 3.1 8B Instruct QLoRA (treino em GPU)",
             "nome_base": "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit",
-            "caminho_adapter": Path("app/modelos/llama31_8b_instruct_lora"),
+            "caminho_adapter": DIRETORIO_MODELOS / "llama31_8b_instruct_lora_gpu",
+            "repo_adapter": HF_REPO_LLAMA,
             "loader": "unsloth",
             "comando_download": (
                 "hf download unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit"
             ),
         },
         "qwen10": {
-            "rotulo": "Qwen3-0.6B 10%",
+            "rotulo": "Qwen3-0.6B 10% (treino em CPU)",
             "nome_base": "Qwen/Qwen3-0.6B",
-            "caminho_adapter": Path(
-                "app/modelos/qwen_06b_lora/qwen3_06b_lora_10pct"
-            ),
+            "caminho_adapter": DIRETORIO_MODELOS / "qwen3_06b_lora_cpu",
+            "repo_adapter": None,
             "loader": "transformers",
             "comando_download": "hf download Qwen/Qwen3-0.6B",
         },
         "qwen80": {
-            "rotulo": "Qwen3-0.6B 80% (q/k/v/o)",
+            "rotulo": "Qwen3-0.6B 80% q/k/v/o (treino em GPU)",
             "nome_base": "Qwen/Qwen3-0.6B",
-            "caminho_adapter": Path(
-                "app/modelos/qwen_06b_lora/"
-                "qwen3_06b_lora_80pct_more_projections"
+            "caminho_adapter": (
+                DIRETORIO_MODELOS
+                / "qwen_06b_lora_gpu"
+                / "qwen3_06b_lora_80pct_more_projections"
             ),
+            "repo_adapter": HF_REPO_QWEN80,
             "loader": "transformers",
             "comando_download": "hf download Qwen/Qwen3-0.6B",
         },
@@ -88,7 +97,7 @@ class FineTuningService:
     CAMINHO_RELATORIO_TECNICO = Path(
         "app/data/relatorios/relatorio_tecnico_fine_tuning.xlsx"
     )
-    CAMINHO_MODELO_FINE_TUNING = Path("app/modelos/llama31_8b_instruct_lora")
+    CAMINHO_MODELO_FINE_TUNING = DIRETORIO_MODELOS / "llama31_8b_instruct_lora_gpu"
     CAMINHO_CHECKPOINTS = CAMINHO_MODELO_FINE_TUNING / "checkpoints"
     COLUNA_TOTAL_TOKENS = "total_okens_fine_tunning"
     COLUNAS_NECESSARIAS = (
@@ -162,9 +171,10 @@ class FineTuningService:
         self.modelo_ajustado_carregado = False
         self.quantidade_registros_descartados_tokens = 0
         self._fast_language_model = None
-        self.chave_modelo = "llama"
+        self._trava_modelo = threading.RLock()
+        self.chave_modelo = MODELO_PADRAO
         self.loader_modelo = "unsloth"
-        self.configurar_modelo("llama")
+        self.configurar_modelo(MODELO_PADRAO)
 
     def configurar_modelo(self, chave_modelo: str) -> None:
         """Seleciona Llama ou Qwen para inferencia/assistente e limpa cache."""
@@ -174,18 +184,30 @@ class FineTuningService:
             raise ValueError(
                 f"Modelo '{chave_modelo}' invalido. Use um de: {disponiveis}."
             )
-        configuracao = self.MODELOS_DISPONIVEIS[chave]
-        self.chave_modelo = chave
-        self.loader_modelo = configuracao["loader"]
-        self.NOME_MODELO_BASE = configuracao["nome_base"]
-        self.CAMINHO_MODELO_FINE_TUNING = Path(configuracao["caminho_adapter"])
-        self.CAMINHO_CHECKPOINTS = (
-            self.CAMINHO_MODELO_FINE_TUNING / "checkpoints"
-        )
+        with self._trava_modelo:
+            if chave == self.chave_modelo and self.modelo_ajustado_carregado:
+                return
+            self.descarregar_modelo()
+            configuracao = self.MODELOS_DISPONIVEIS[chave]
+            self.chave_modelo = chave
+            self.loader_modelo = configuracao["loader"]
+            self.NOME_MODELO_BASE = configuracao["nome_base"]
+            self.CAMINHO_MODELO_FINE_TUNING = Path(
+                configuracao["caminho_adapter"]
+            )
+            self.CAMINHO_CHECKPOINTS = (
+                self.CAMINHO_MODELO_FINE_TUNING / "checkpoints"
+            )
+
+    def descarregar_modelo(self) -> None:
+        """Libera o modelo atual e devolve VRAM/RAM antes de uma troca."""
         self.tokenizer = None
         self.modelo = None
         self.modelo_ajustado_carregado = False
         self._fast_language_model = None
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     def gerar_resposta_modelo_ajustado(
         self,
@@ -194,26 +216,27 @@ class FineTuningService:
         max_novos_tokens: int = 384,
     ) -> str:
         """Gera uma resposta usando o adaptador LoRA configurado (Llama/Qwen)."""
-        self._carregar_modelo_ajustado()
-        return self._gerar_resposta(
-            mensagem_system=mensagem_system,
-            mensagem_usuario=mensagem_usuario,
-            max_novos_tokens=max_novos_tokens,
-        )
+        with self._trava_modelo:
+            self._carregar_modelo_ajustado()
+            return self._gerar_resposta(
+                mensagem_system=mensagem_system,
+                mensagem_usuario=mensagem_usuario,
+                max_novos_tokens=max_novos_tokens,
+            )
 
     @staticmethod
     def _importar_fast_language_model():
-        """Retorna o FastLanguageModel do Unsloth (importado no topo do modulo)."""
+        """Importa Unsloth apenas quando o Llama for realmente solicitado."""
+        import unsloth  # noqa: F401
+        from unsloth import FastLanguageModel
+
         return FastLanguageModel
 
     def _obter_caminho_modelo_base(self) -> Path:
         """Resolve o caminho local do modelo-base no cache do Hugging Face."""
         try:
             return Path(
-                snapshot_download(
-                    repo_id=self.NOME_MODELO_BASE,
-                    local_files_only=True,
-                )
+                snapshot_download(repo_id=self.NOME_MODELO_BASE)
             )
         except OSError as erro:
             raise FileNotFoundError(
@@ -703,6 +726,7 @@ class FineTuningService:
 
     def _carregar_modelo_ajustado(self) -> None:
         """Carrega o modelo-base e o adaptador LoRA conforme a chave configurada."""
+        self._garantir_adapter_local()
         caminho_configuracao = (
             self.CAMINHO_MODELO_FINE_TUNING / "adapter_config.json"
         )
@@ -747,29 +771,58 @@ class FineTuningService:
         self.modelo.eval()
         self.modelo_ajustado_carregado = True
 
+    def _garantir_adapter_local(self) -> None:
+        """Baixa do Hub o adapter publicado quando ele não existe localmente."""
+        if (self.CAMINHO_MODELO_FINE_TUNING / "adapter_config.json").exists():
+            return
+        configuracao = self.MODELOS_DISPONIVEIS[self.chave_modelo]
+        repo_adapter = configuracao.get("repo_adapter")
+        if not repo_adapter:
+            raise FileNotFoundError(
+                "O adapter Qwen10 distribuído com o projeto não foi encontrado em "
+                f"{self.CAMINHO_MODELO_FINE_TUNING}."
+            )
+        self.CAMINHO_MODELO_FINE_TUNING.mkdir(parents=True, exist_ok=True)
+        try:
+            snapshot_download(
+                repo_id=str(repo_adapter),
+                local_dir=self.CAMINHO_MODELO_FINE_TUNING,
+            )
+        except OSError as erro:
+            raise FileNotFoundError(
+                f"Não foi possível baixar o adapter {repo_adapter}. "
+                "Verifique internet, autenticação e acesso ao repositório."
+            ) from erro
+
     def _carregar_modelo_transformers_peft(self) -> None:
         """Carrega Qwen (ou similar) via transformers + Peft em GPU/CPU."""
-        if self.DISPOSITIVO != "cuda":
-            raise RuntimeError(
-                "A inferencia do adaptador exige GPU CUDA neste ambiente."
-            )
         caminho_modelo = self._obter_caminho_modelo_base()
         self.tokenizer = AutoTokenizer.from_pretrained(
             caminho_modelo,
             local_files_only=True,
         )
         self._configurar_tokenizer()
-        tipo = (
-            torch.bfloat16
-            if torch.cuda.is_bf16_supported()
-            else torch.float16
-        )
+        usando_cuda = self.DISPOSITIVO == "cuda"
+        tipo = torch.float32
+        if usando_cuda:
+            tipo = (
+                torch.bfloat16
+                if torch.cuda.is_bf16_supported()
+                else torch.float16
+            )
+        kwargs_modelo: dict[str, Any] = {
+            "dtype": tipo,
+            "local_files_only": True,
+            "low_cpu_mem_usage": True,
+        }
+        if usando_cuda:
+            kwargs_modelo["device_map"] = "auto"
         modelo_base = AutoModelForCausalLM.from_pretrained(
             caminho_modelo,
-            torch_dtype=tipo,
-            device_map="auto",
-            local_files_only=True,
+            **kwargs_modelo,
         )
+        if not usando_cuda:
+            modelo_base.to("cpu")
         self.modelo = PeftModel.from_pretrained(
             modelo_base,
             self.CAMINHO_MODELO_FINE_TUNING,
@@ -854,10 +907,15 @@ class FineTuningService:
             {"role": "system", "content": mensagem_system.strip()},
             {"role": "user", "content": mensagem_usuario.strip()},
         ]
+        kwargs_template: dict[str, Any] = {
+            "tokenize": False,
+            "add_generation_prompt": True,
+        }
+        if self.chave_modelo.startswith("qwen"):
+            kwargs_template["enable_thinking"] = False
         prompt = self.tokenizer.apply_chat_template(
             mensagens,
-            tokenize=False,
-            add_generation_prompt=True,
+            **kwargs_template,
         )
         entradas = self.tokenizer(
             prompt,

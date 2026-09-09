@@ -23,6 +23,9 @@ Status revisado em 29/08/2026 a partir do código-fonte, sem leitura ou inspeç�
 11. Persistência local do adaptador, tokenizer, checkpoints e métricas de treino e validação.
 12. Inferência com o modelo ajustado e comparação lado a lado com o modelo-base e a resposta esperada.
 13. Assistente médico LangChain/LangGraph (opção 11) com tool `buscar_prontuario`, escolha Llama/Qwen e HITL (revisão humana obrigatória antes de liberar a resposta).
+14. API FastAPI com SSE para acompanhar os nós do LangGraph em tempo real.
+15. Frontend React/Vite com seleção dinâmica de Llama, Qwen10 e Qwen80 e revisão HITL editável.
+16. Execução portátil via scripts locais ou Docker Compose em camadas frontend/backend.
 
 O menu de `main.py` apresenta o pipeline e o assistente; a opção 12 encerra. A opção 0 executa as etapas de preparação 2 a 6; a opção 1 executa treino/avaliação 7 a 10.
 
@@ -36,11 +39,15 @@ O menu de `main.py` apresenta o pipeline e o assistente; a opção 12 encerra. A
 ## Estrutura Atual
 
 - `main.py`: ponto de entrada local, menu, pipeline e assistente HITL.
+- `app/api/`: API REST/SSE e estado transitório das sessões.
 - `app/assistente/`: fluxo LangGraph, chain LangChain, tool calling (`buscar_prontuario`), auditoria e repositório Excel.
+- `frontend/`: interface React e visualização animada do fluxo.
+- `docker-compose.yml`: execução CPU; `docker-compose.gpu.yml`: extensão NVIDIA.
 - `app/services/arquivo_service.py`: leitura de Excel, criação de Excel/TXT e atualização atômica de arquivos Excel por meio de arquivo temporário.
 - `app/services/qualidade_service.py`: análise e remoção de registros duplicados ou com campos monitorados ausentes.
 - `app/services/pii_service.py`: detecção de PII com Presidio, reconhecedor de CPF e anonimização dos campos textuais.
 - `app/services/fine_tuning_service.py`: preparação e validação dos datasets, treinamento LoRA, inferências e comparação dos resultados.
+- `scripts/comparar_chatbots_langgraph.py`: 2ª rodada da comparação Qwen vs. Llama em três braços (modelo cru, modelo com anti-repetição e pipeline LangGraph). A 1ª rodada, anterior à integração do LangGraph, está em `../chatbot-modelo-fine-tunning/comparar_qwen_llama.py`.
 - `app/modelos/`: adaptadores e checkpoints locais, ignorados pelo Git.
 - `app/data/original/`: arquivo original, que deve permanecer inalterado.
 - `app/data/processado/`: arquivos de auditoria e de preparação para fine-tuning.
@@ -130,7 +137,7 @@ Os pull requests devem incluir:
 
 Nunca comite datasets brutos sensíveis, artefatos com PII/PHI nem chaves de API.
 
-Não comite adaptadores, checkpoints ou modelos gerados pelo treinamento. Não publique esses artefatos no Hugging Face sem revisão e autorização explícitas.
+Não comite adaptadores, checkpoints ou modelos gerados pelo treinamento. Os adapters Llama e Qwen80 foram publicados no Hugging Face após revisão e autorização explícitas; novas publicações exigem nova autorização.
 
 Não leia, abra, liste ou inspecione nenhum arquivo ou pasta dentro de `app/data` durante a execução das tarefas do ChatGPT.
 

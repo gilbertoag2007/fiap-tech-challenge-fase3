@@ -1,4 +1,14 @@
-"""Compara respostas do chatbot entre Qwen 0.6B (80% q/k/v/o) e Llama 3.1 QLoRA."""
+"""1a rodada: compara Qwen 0.6B (80% q/k/v/o) e Llama 3.1 QLoRA isolados.
+
+Este script mede os modelos CRUS: chama `model.generate` diretamente, sem
+LangChain, sem LangGraph e sem os controles anti-repeticao
+(`repetition_penalty`, `no_repeat_ngram_size`) que o `FineTuningService` passou
+a aplicar depois. Os `loops` que ele registra descrevem o modelo isolado, nao o
+comportamento do assistente entregue.
+
+A 2a rodada, com o pipeline integrado, esta em
+`fine-tunning-llm/scripts/comparar_chatbots_langgraph.py`.
+"""
 from __future__ import annotations
 
 import gc
@@ -266,7 +276,7 @@ MODELOS = {
         "base": "Qwen/Qwen3-0.6B",
         "adapter": str(
             DIR_FT
-            / "app/modelos/qwen_06b_lora/qwen3_06b_lora_80pct_more_projections"
+            / "app/modelos/qwen_06b_lora_gpu/qwen3_06b_lora_80pct_more_projections"
         ),
         "tipo": "qwen",
         "max_length": 512,
@@ -276,7 +286,7 @@ MODELOS = {
     "llama31_qlora": {
         "rotulo": "Llama 3.1 8B Instruct QLoRA",
         "base": "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit",
-        "adapter": str(DIR_FT / "app/modelos/llama31_8b_instruct_lora"),
+        "adapter": str(DIR_FT / "app/modelos/llama31_8b_instruct_lora_gpu"),
         "tipo": "llama",
         "max_length": 512,
         "max_new_tokens": 300,
@@ -442,6 +452,11 @@ def main() -> None:
         "",
         f"Gerado em: {resultados['gerado_em']}",
         f"Perguntas: {n}",
+        "",
+        "> **1a rodada — modelos isolados.** Medido sem LangChain, sem "
+        "LangGraph e sem `repetition_penalty`/`no_repeat_ngram_size`. "
+        "Para o comportamento do assistente entregue, ver "
+        "`comparacao_chatbots_langgraph_20q.md`.",
         "",
         "## Resumo automatico",
         "",

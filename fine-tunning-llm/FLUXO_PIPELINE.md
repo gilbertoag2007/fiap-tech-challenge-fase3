@@ -526,8 +526,11 @@ O projeto possui duas formas complementares de avaliação:
 
 1. **Avaliação técnica automática:** realizada na etapa 8 sobre o split de validação, comparando métricas antes e depois do LoRA.
 2. **Avaliação comparativa e clínica:** preparada na etapa 10 sobre o split de teste, colocando lado a lado a resposta esperada, a resposta-base e a resposta ajustada.
+3. **Avaliação comportamental dos chatbots:** executada fora do menu, em duas rodadas de 20 casos que comparam Qwen3-0.6B e Llama 3.1 por aderência de formato e ocorrência de *loops* — a 1ª rodada com os modelos isolados (`chatbot-modelo-fine-tunning/comparar_qwen_llama.py`, anterior à integração LangChain/LangGraph) e a 2ª com o pipeline integrado (`scripts/comparar_chatbots_langgraph.py`).
 
 O teste final somente termina após um avaliador preencher e revisar os critérios manuais de estrutura, relevância clínica, alucinação e exposição de PII. As métricas de tokens e perda não são suficientes para confirmar segurança ou correção clínica.
+
+A revisão manual também precisa considerar **erros de linguagem**: modelos pequenos como o Qwen3-0.6B erram grafia, concordância e pontuação, inclusive nos títulos das seções obrigatórias — caso em que a validação determinística acusa seção ausente embora o conteúdo esteja presente.
 
 ## Dependências entre as etapas
 
@@ -571,6 +574,8 @@ flowchart LR
 | `app/data/relatorios/metricas_fine_tuning.txt` | Configuração, métricas e estatísticas agregadas. |
 | `app/data/relatorios/relatorio_tecnico_fine_tuning.xlsx` | Comparação técnica antes/depois e veredito automático. |
 | `app/data/relatorios/avaliacao_inferencias.xlsx` | Resposta esperada, inferências base e ajustada e campos de avaliação manual. |
+| `app/data/relatorios/comparacao_chatbot_qwen_vs_llama_20q.md` | 1ª rodada da avaliação comportamental: modelos isolados. |
+| `app/data/relatorios/comparacao_chatbots_langgraph_20q.md` | 2ª rodada: três braços com o pipeline LangChain/LangGraph. |
 
 ## Diagnóstico auxiliar de tokens
 

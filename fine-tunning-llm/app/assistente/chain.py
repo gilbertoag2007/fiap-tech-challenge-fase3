@@ -70,6 +70,20 @@ class AssistenteChain:
                 "pergunta_clinica": pergunta_normalizada,
             }
         ).strip()
+        resposta = re.sub(
+            r"<think>.*?</think>",
+            "",
+            resposta,
+            flags=re.IGNORECASE | re.DOTALL,
+        ).strip()
+        if "<think>" in resposta.lower():
+            inicio_resposta = re.search(
+                r"^[ \t]*Resposta[ \t]*:",
+                resposta,
+                flags=re.IGNORECASE | re.MULTILINE,
+            )
+            if inicio_resposta:
+                resposta = resposta[inicio_resposta.start():].strip()
         if not resposta:
             raise ValueError("O modelo não retornou um rascunho clínico.")
         secoes_ausentes = [

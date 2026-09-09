@@ -25,6 +25,7 @@ class ServicoAuditoriaAssistente:
         fontes: Sequence[str] = (),
         alertas: Sequence[str] = (),
         decisao_humana: bool | None = None,
+        acao_humana: str | None = None,
         tipo_erro: str | None = None,
     ) -> None:
         """Acrescenta um evento sem dados clínicos ou identificador de registro."""
@@ -38,6 +39,8 @@ class ServicoAuditoriaAssistente:
         }
         if decisao_humana is not None:
             evento["decisao_humana"] = decisao_humana
+        if acao_humana is not None:
+            evento["acao_humana"] = acao_humana
         if tipo_erro is not None:
             evento["tipo_erro"] = tipo_erro
 

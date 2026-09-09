@@ -1,0 +1,6 @@
+Registros com colunas ausentes:
+Linha 22 | Coluna pergunta_original | Valor ausente
+Linha 34 | Coluna pergunta_original | Valor ausente
+Linha 39 | Coluna prontuario_contexto | Valor ausente
+Linha 19 | Coluna resposta_estruturada | Valor ausente
+Linha 27 | Coluna resposta_estruturada | Valor ausente

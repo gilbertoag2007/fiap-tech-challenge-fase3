@@ -1,0 +1,7 @@
+Linhas repetidas identificadas:
+Linha 2
+Linha 3
+Linha 7
+Linha 8
+Linha 16
+Linha 17

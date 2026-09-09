@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from threading import Lock
 from typing import Protocol
 
 import pandas as pd
@@ -24,6 +25,9 @@ class RepositorioProntuarios(Protocol):
     def buscar_por_id(self, id_registro: str) -> RegistroClinico:
         pass
 
+    def listar(self, busca: str = "", limite: int = 20) -> list[dict[str, str]]:
+        pass
+
 
 class RepositorioProntuariosExcel:
     """Consulta um arquivo Excel anonimizado por identificador de registro."""
@@ -40,13 +44,92 @@ class RepositorioProntuariosExcel:
     )
     COLUNAS_OBRIGATORIAS = ("id", "prontuario_contexto_anonimizado")
 
+    # Campos exibidos apenas no seletor da interface. Deliberadamente separados
+    # de CAMPOS_PERMITIDOS: o que entra no prompt do modelo — e, portanto, na
+    # lista de fontes — continua sendo exclusivamente a allowlist acima.
+    CAMPOS_LISTAGEM = (
+        "especialidade_medica",
+        "hipotese_clinica",
+        "diagnostico_confirmado",
+        "tipo_pergunta",
+        "contexto_solicitacao",
+    )
+    CAMPO_PERGUNTA_SUGERIDA = "pergunta_original_anonimizado"
+
     def __init__(self, servico_arquivo: object, caminho_arquivo: Path | str) -> None:
         self.servico_arquivo = servico_arquivo
         self.caminho_arquivo = Path(caminho_arquivo)
+        self._cache: tuple[float, int, pd.DataFrame] | None = None
+        self._trava_cache = Lock()
+
+    def _carregar_dataframe(self) -> pd.DataFrame:
+        """Lê a planilha uma vez e reaproveita enquanto o arquivo não mudar.
+
+        A busca do seletor dispara a cada digitação; reler 14 mil linhas de
+        Excel a cada tecla tornaria a interface inutilizável.
+        """
+        try:
+            estado = self.caminho_arquivo.stat()
+            assinatura = (estado.st_mtime, estado.st_size)
+        except OSError:
+            assinatura = None
+
+        with self._trava_cache:
+            if (
+                assinatura is not None
+                and self._cache is not None
+                and self._cache[:2] == assinatura
+            ):
+                return self._cache[2]
+            dataframe = self.servico_arquivo.gerar_dataframe(self.caminho_arquivo)
+            if assinatura is not None:
+                self._cache = (assinatura[0], assinatura[1], dataframe)
+            return dataframe
+
+    def listar(self, busca: str = "", limite: int = 20) -> list[dict[str, str]]:
+        """Lista registros para o seletor, opcionalmente filtrados por texto.
+
+        Um termo puramente numérico casa pelo início do ID, para que digitar o
+        identificador continue sendo o caminho mais curto.
+        """
+        dataframe = self._carregar_dataframe()
+        self._validar_colunas_obrigatorias(dataframe)
+
+        termo = (busca or "").strip().lower()
+        if termo:
+            identificadores = dataframe["id"].map(self._normalizar_identificador)
+            if termo.isdigit():
+                selecao = identificadores.str.startswith(termo)
+            else:
+                selecao = pd.Series(False, index=dataframe.index)
+                for coluna in self.CAMPOS_LISTAGEM:
+                    if coluna in dataframe.columns:
+                        selecao |= (
+                            dataframe[coluna]
+                            .astype(str)
+                            .str.lower()
+                            .str.contains(termo, regex=False, na=False)
+                        )
+            dataframe = dataframe.loc[selecao]
+
+        limite = max(1, min(int(limite), 50))
+        resultados: list[dict[str, str]] = []
+        for _, linha in dataframe.head(limite).iterrows():
+            item: dict[str, str] = {
+                "id_registro": self._normalizar_identificador(linha["id"])
+            }
+            for coluna in self.CAMPOS_LISTAGEM:
+                if coluna in linha.index and not self._valor_vazio(linha[coluna]):
+                    item[coluna] = str(linha[coluna]).strip()
+            pergunta = linha.get(self.CAMPO_PERGUNTA_SUGERIDA)
+            if not self._valor_vazio(pergunta):
+                item["pergunta_sugerida"] = str(pergunta).strip()
+            resultados.append(item)
+        return resultados
 
     def buscar_por_id(self, id_registro: str) -> RegistroClinico:
         """Retorna exatamente um registro, com campos explicitamente permitidos."""
-        dataframe = self.servico_arquivo.gerar_dataframe(self.caminho_arquivo)
+        dataframe = self._carregar_dataframe()
         self._validar_colunas_obrigatorias(dataframe)
 
         identificador_normalizado = self._normalizar_identificador(id_registro)
