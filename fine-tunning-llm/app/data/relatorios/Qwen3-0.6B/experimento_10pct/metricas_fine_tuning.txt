@@ -1,0 +1,69 @@
+Metricas do fine-tuning
+modelo_base: Qwen/Qwen3-0.6B
+metodo: SFT com LoRA
+limite_registros: None
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+taxa_aprendizado: 0.0001
+epocas: 3
+max_tokens: 512
+
+Metricas de treinamento:
+epoch: 3.0
+melhor_perda_validacao: 0.6594846844673157
+parametros_totais: 598343680
+parametros_treinaveis: 2293760
+passos_treinamento: 393
+percentual_parametros_treinaveis: 0.3833515881708653
+total_flos: 3748804313481216.0
+train_loss: 0.7608253202820552
+train_runtime: 438.7583
+train_samples_per_second: 7.145
+train_steps_per_second: 0.896
+
+Metricas de validacao antes do fine-tuning:
+epoch: 0
+eval_entropy: 1.594280595962818
+eval_loss: 2.5109989643096924
+eval_mean_token_accuracy: 0.5179745889627017
+eval_model_preparation_time: 0.004
+eval_num_tokens: 0.0
+eval_runtime: 6.1256
+eval_samples_per_second: 21.222
+eval_steps_per_second: 21.222
+
+Metricas de validacao:
+epoch: 3.0
+eval_entropy: 0.6523003032574287
+eval_loss: 0.6594846844673157
+eval_mean_token_accuracy: 0.8671121629384848
+eval_model_preparation_time: 0.004
+eval_num_tokens: 1411146.0
+eval_runtime: 8.2469
+eval_samples_per_second: 15.764
+eval_steps_per_second: 15.764
+perplexidade: 1.9337955627076218
+
+Estatisticas de tokens:
+[treino]
+exemplos_acima_limite: 0
+quantidade_exemplos: 1045
+tokens_maximos: 511
+tokens_mediana: 451.0
+tokens_minimos: 375
+tokens_percentil_95: 502
+[validacao]
+exemplos_acima_limite: 0
+quantidade_exemplos: 130
+tokens_maximos: 509
+tokens_mediana: 451.5
+tokens_minimos: 383
+tokens_percentil_95: 500
+[teste]
+exemplos_acima_limite: 0
+quantidade_exemplos: 131
+tokens_maximos: 507
+tokens_mediana: 451.0
+tokens_minimos: 377
+tokens_percentil_95: 501

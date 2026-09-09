@@ -1,0 +1,2 @@
+Registros com colunas ausentes:
+Registros com colunas ausentes não encontrados.

@@ -1,0 +1,13 @@
+Registros com colunas ausentes:
+Linha 2349 | Coluna papel_solicitante | Valor ausente
+Linha 2353 | Coluna papel_solicitante | Valor ausente
+Linha 2353 | Coluna contexto_solicitacao | Valor ausente
+Linha 22 | Coluna pergunta_original | Valor ausente
+Linha 34 | Coluna pergunta_original | Valor ausente
+Linha 39 | Coluna prontuario_contexto | Valor ausente
+Linha 2349 | Coluna prontuario_contexto | Valor ausente
+Linha 19 | Coluna resposta_estruturada | Valor ausente
+Linha 27 | Coluna resposta_estruturada | Valor ausente
+Linha 2349 | Coluna resposta_estruturada | Valor ausente
+Linha 2353 | Coluna resposta_estruturada | Valor ausente
+Linha 2353 | Coluna hipotese_clinica | Valor ausente

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import re
-from typing import Literal, cast
+from time import perf_counter
+from typing import Any, Callable, Literal, cast
 
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
@@ -11,6 +12,11 @@ from langgraph.types import Command, interrupt
 
 from app.assistente.auditoria import ServicoAuditoriaAssistente
 from app.assistente.chain import AVISO_REVISAO_HUMANA, AssistenteChain
+from app.assistente.ferramentas import (
+    criar_ferramentas_assistente,
+    invocar_buscar_prontuario,
+    mapa_ferramentas,
+)
 from app.assistente.modelos import (
     DecisaoHumana,
     EstadoAssistente,
@@ -29,10 +35,14 @@ class FluxoAssistenteMedico:
         repositorio: RepositorioProntuarios,
         chain_assistente: AssistenteChain,
         auditoria: ServicoAuditoriaAssistente,
+        observador_eventos: Callable[[dict[str, object]], None] | None = None,
     ) -> None:
         self.repositorio = repositorio
         self.chain_assistente = chain_assistente
         self.auditoria = auditoria
+        self.observador_eventos = observador_eventos
+        self.ferramentas = criar_ferramentas_assistente(repositorio)
+        self.ferramentas_por_nome = mapa_ferramentas(self.ferramentas)
         self.grafo = self._construir_grafo()
 
     def iniciar(self, solicitacao: SolicitacaoAssistente) -> RevisaoPendente:
@@ -78,15 +88,84 @@ class FluxoAssistenteMedico:
                 pass
             raise
 
+    def historico_checkpoints(
+        self,
+        id_execucao: str,
+        limite: int = 60,
+    ) -> list[dict[str, object]]:
+        """Lê o InMemorySaver e devolve metadados sanitizados dos checkpoints.
+
+        Expõe apenas telemetria de persistência do grafo (passo, nós pendentes,
+        chaves gravadas no estado). Nenhum valor clínico é retornado, mantendo o
+        painel de logs alinhado à política de auditoria sem dados sensíveis.
+        """
+        instantaneos = list(
+            self.grafo.get_state_history(self._configuracao(id_execucao))
+        )
+        instantaneos.reverse()  # ordem cronológica: do passo -1 até o último.
+
+        registros: list[dict[str, object]] = []
+        chaves_anteriores: set[str] = set()
+        for instantaneo in instantaneos:
+            chaves_atuais = set(instantaneo.values or {})
+            tarefas = getattr(instantaneo, "tasks", ()) or ()
+            metadados = dict(instantaneo.metadata or {})
+            registros.append(
+                {
+                    "checkpoint_id": str(
+                        instantaneo.config.get("configurable", {}).get(
+                            "checkpoint_id",
+                            "",
+                        )
+                    ),
+                    "passo": metadados.get("step"),
+                    "origem": metadados.get("source", ""),
+                    "criado_em": instantaneo.created_at,
+                    "proximos_nos": list(instantaneo.next or ()),
+                    "tarefas_pendentes": [tarefa.name for tarefa in tarefas],
+                    "chaves_estado": sorted(chaves_atuais),
+                    "chaves_gravadas": sorted(chaves_atuais - chaves_anteriores),
+                    "interrompido": any(
+                        getattr(tarefa, "interrupts", ()) for tarefa in tarefas
+                    ),
+                }
+            )
+            chaves_anteriores = chaves_atuais
+        return registros[-limite:]
+
     def _construir_grafo(self):
         fluxo = StateGraph(EstadoAssistente)
-        fluxo.add_node("validar_entrada", self._validar_entrada)
-        fluxo.add_node("consultar_registro", self._consultar_registro)
-        fluxo.add_node("gerar_rascunho", self._gerar_rascunho)
-        fluxo.add_node("validar_seguranca", self._validar_seguranca)
-        fluxo.add_node("solicitar_revisao_humana", self._solicitar_revisao_humana)
-        fluxo.add_node("finalizar_aprovacao", self._finalizar_aprovacao)
-        fluxo.add_node("finalizar_rejeicao", self._finalizar_rejeicao)
+        fluxo.add_node(
+            "validar_entrada",
+            self._envolver_no("validar_entrada", self._validar_entrada),
+        )
+        fluxo.add_node(
+            "consultar_registro",
+            self._envolver_no("consultar_registro", self._consultar_registro),
+        )
+        fluxo.add_node(
+            "gerar_rascunho",
+            self._envolver_no("gerar_rascunho", self._gerar_rascunho),
+        )
+        fluxo.add_node(
+            "validar_seguranca",
+            self._envolver_no("validar_seguranca", self._validar_seguranca),
+        )
+        fluxo.add_node(
+            "solicitar_revisao_humana",
+            self._envolver_no(
+                "solicitar_revisao_humana",
+                self._solicitar_revisao_humana,
+            ),
+        )
+        fluxo.add_node(
+            "finalizar_aprovacao",
+            self._envolver_no("finalizar_aprovacao", self._finalizar_aprovacao),
+        )
+        fluxo.add_node(
+            "finalizar_rejeicao",
+            self._envolver_no("finalizar_rejeicao", self._finalizar_rejeicao),
+        )
 
         fluxo.add_edge(START, "validar_entrada")
         fluxo.add_edge("validar_entrada", "consultar_registro")
@@ -105,6 +184,36 @@ class FluxoAssistenteMedico:
         fluxo.add_edge("finalizar_rejeicao", END)
         return fluxo.compile(checkpointer=InMemorySaver())
 
+    def _envolver_no(
+        self,
+        nome: str,
+        funcao: Callable[[EstadoAssistente], EstadoAssistente],
+    ) -> Callable[[EstadoAssistente], EstadoAssistente]:
+        """Emite telemetria transitória de cada nó sem conteúdo clínico."""
+
+        def executar(estado: EstadoAssistente) -> EstadoAssistente:
+            inicio = perf_counter()
+            self._emitir_evento(estado, nome, "iniciado")
+            try:
+                resultado = funcao(estado)
+            except Exception:
+                self._emitir_evento(
+                    estado,
+                    nome,
+                    "falha",
+                    duracao_ms=(perf_counter() - inicio) * 1000,
+                )
+                raise
+            self._emitir_evento(
+                estado,
+                nome,
+                "concluido",
+                duracao_ms=(perf_counter() - inicio) * 1000,
+            )
+            return resultado
+
+        return executar
+
     def _validar_entrada(self, estado: EstadoAssistente) -> EstadoAssistente:
         id_registro = estado["id_registro"].strip()
         pergunta_clinica = estado["pergunta_clinica"].strip()
@@ -120,11 +229,23 @@ class FluxoAssistenteMedico:
         return atualizacao
 
     def _consultar_registro(self, estado: EstadoAssistente) -> EstadoAssistente:
-        registro = self.repositorio.buscar_por_id(estado["id_registro"])
+        # Tool calling adaptado: o grafo invoca a tool de forma determinística
+        # (seguro para modelos locais sem function-calling nativo confiável).
+        payload = invocar_buscar_prontuario(
+            self.ferramentas_por_nome,
+            estado["id_registro"],
+        )
+        id_retornado = str(payload.get("id_registro", "")).strip()
+        if id_retornado != estado["id_registro"].strip():
+            raise RuntimeError(
+                "O ID retornado pela ferramenta não corresponde ao ID solicitado."
+            )
+        campos = dict(payload.get("campos", {}))
+        fontes = list(payload.get("fontes", []))
         atualizacao: EstadoAssistente = {
-            "contexto_clinico": dict(registro.campos),
-            "campos": dict(registro.campos),
-            "fontes": list(registro.fontes),
+            "contexto_clinico": campos,
+            "campos": campos,
+            "fontes": fontes,
         }
         self._auditar(atualizacao | estado, "consultar_registro", "concluida")
         return atualizacao
@@ -169,14 +290,26 @@ class FluxoAssistenteMedico:
             )
         )
         return {
-            "decisao_humana": decisao.aprovado,
+            "decisao_humana": decisao.acao_efetiva != "rejeitar",
+            "acao_humana": decisao.acao_efetiva,
             "observacao_humana": decisao.observacao,
+            "texto_revisado": (decisao.texto_revisado or "").strip(),
         }
 
     def _finalizar_aprovacao(self, estado: EstadoAssistente) -> EstadoAssistente:
+        resposta = estado["rascunho"]
+        if estado.get("acao_humana") == "editar":
+            resposta = estado.get("texto_revisado", "").strip()
+            if AVISO_REVISAO_HUMANA not in resposta:
+                resposta = f"{resposta}\n\n{AVISO_REVISAO_HUMANA}"
+        alertas = self._alertas_seguranca(
+            resposta,
+            estado.get("fontes", []),
+        )
         atualizacao: EstadoAssistente = {
             "situacao": "aprovada",
-            "resposta": estado["rascunho"],
+            "resposta": resposta,
+            "alertas": alertas,
         }
         self._auditar(atualizacao | estado, "finalizar_aprovacao", "concluida")
         return atualizacao
@@ -237,6 +370,7 @@ class FluxoAssistenteMedico:
             fontes=estado.get("fontes", []),
             alertas=estado.get("alertas", []),
             decisao_humana=estado.get("decisao_humana"),
+            acao_humana=estado.get("acao_humana"),
         )
 
     def _registrar_falha(self, id_execucao: str, etapa: str, erro: Exception) -> None:
@@ -246,3 +380,21 @@ class FluxoAssistenteMedico:
             situacao="falha",
             tipo_erro=type(erro).__name__,
         )
+
+    def _emitir_evento(
+        self,
+        estado: EstadoAssistente,
+        no: str,
+        status: str,
+        duracao_ms: float | None = None,
+    ) -> None:
+        if self.observador_eventos is None:
+            return
+        evento: dict[str, object] = {
+            "id_execucao": estado.get("id_execucao", ""),
+            "no": no,
+            "status": status,
+        }
+        if duracao_ms is not None:
+            evento["duracao_ms"] = round(duracao_ms, 2)
+        self.observador_eventos(evento)

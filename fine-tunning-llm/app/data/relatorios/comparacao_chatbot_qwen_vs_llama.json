@@ -1,0 +1,117 @@
+{
+  "gerado_em": "2026-09-04T14:31:26",
+  "system": "Voce e um assistente especializado em apoio clinico. Responda somente a solicitacao, sem repetir o papel, o prontuario ou a pergunta. Use exatamente as secoes: Resposta, Consideracoes clinicas, Conduta/Orientacao e Limitacoes.",
+  "perguntas": [
+    {
+      "id": "P1",
+      "titulo": "Soja e puberdade precoce",
+      "texto": "Papel do solicitante: Medico(a)\nContexto da solicitacao: Diagnostico\nProntuario: Paciente do Sexo Nao informado. Idade: 7. Exames/Resultado: Nao informado.\nPergunta: O suco de soja por um periodo pode causar puberdade precoce em criancas?"
+    },
+    {
+      "id": "P2",
+      "titulo": "Vacina COVID e leucopenia",
+      "texto": "Papel do solicitante: Medico(a)\nContexto da solicitacao: Conduta e Tratamento\nProntuario: Paciente do Sexo Feminino. Idade: 12. Diagnosticos anteriores: leucopenia em acompanhamento.\nPergunta: Adolescente com leucopenia pode receber vacina contra COVID-19?"
+    },
+    {
+      "id": "P3",
+      "titulo": "Hipotireoidismo e drenagem linfatica",
+      "texto": "Papel do solicitante: Medico(a)\nContexto da solicitacao: Procedimentos\nProntuario: Paciente refere hipotireoidismo em tratamento.\nPergunta: Paciente com hipotireoidismo pode fazer drenagem linfatica?"
+    },
+    {
+      "id": "P4",
+      "titulo": "Dor toracica",
+      "texto": "Papel do solicitante: Medico(a)\nContexto da solicitacao: Diagnostico\nProntuario: Paciente adulto com dor no peito ha 2 horas, sudorese e falta de ar. Exames nao informados.\nPergunta: Como orientar esse caso de dor toracica aguda?"
+    },
+    {
+      "id": "P5",
+      "titulo": "Pos-colecistectomia",
+      "texto": "Papel do solicitante: Medico(a)\nContexto da solicitacao: Procedimentos\nProntuario: Paciente 19 anos, cirurgia de emergencia de vesicula ha poucos dias, com nauseas, vomitos e dor abdominal.\nPergunta: Solicita-se orientacao sobre esse quadro pos-operatorio."
+    }
+  ],
+  "modelos": {
+    "qwen_80pct_qkvo": {
+      "rotulo": "Qwen3-0.6B 80% (q/k/v/o)",
+      "adapter": "/home/victor/cursos/FIAP/fase-3/fiap-tech-challenge-fase3/fine-tunning-llm/app/modelos/qwen_06b_lora/qwen3_06b_lora_80pct_more_projections",
+      "base": "Qwen/Qwen3-0.6B",
+      "respostas": [
+        {
+          "id": "P1",
+          "titulo": "Soja e puberdade precoce",
+          "resposta": "Resposta:\nO suco de soja não causa puberdade precoce. O suco de soja é uma fonte de proteína e pode ser usado como um complemento alimentar para ajudar a prevenir a puberdade precoce. Consulte um nutricionista para saber como usar o suco de soja de forma saudável.\n\nConsiderações clínicas:\nO caso deve ser interpretado no contexto da hipótese clínica de Puberdade Precoce.\n\nConduta/Orientação:\nRecomenda-se avaliação por Nutricionista para correlação dos achados e definição individualizada da conduta. A confirmação diagnóstica deve ser baseada em história clínica, exame físico e exames complementares quando indicados.\n\nLimitações:\nNão foram informados exames ou resultados complementares. Não há informação sobre idade pessoal. Não há informação sobre respectivo status diagnóstico, confirmação diagnóstica ou avaliação individualizada da conduta.",
+          "secoes_detectadas": 4,
+          "chars": 851
+        },
+        {
+          "id": "P2",
+          "titulo": "Vacina COVID e leucopenia",
+          "resposta": "Resposta:\nSim, pode. A vacina contra o COVID-19 é recomendada para todos os grupos de risco, incluindo adolescentes. A leucopenia, ou deficiência de leucócitos, é uma condição que pode aumentar o risco de infecções graves, como a COVID-19. Portanto, é importante que você siga as orientações do seu médico e siga as medidas de prevenção recomendadas para a vacinação contra o COVID-19. Se você tem leucopenia, é importante que você siga as orientações do seu médico e siga as medidas de prevenção recomendadas para a vacinação contra o COVID-19. Se você tem leucopenia, é importante que você siga as orientações do seu médico e siga as medidas de prevenção recomendadas para a vacinação contra o COVID-19. Se você tem leucopenia, é importante que você siga as orientações do seu médico e siga as medidas de prevenção recomendadas para a vacinação contra o COVID-19.\n\nConsiderações clínicas:\nO caso deve ser interpretado no contexto da hipótese clínica de Leucopenia. A condição é apresentada no registro como diagnóstico confirmado. O histórico de leucopenia em acompanhamento pode ser relevante para a interpre",
+          "secoes_detectadas": 2,
+          "chars": 1111
+        },
+        {
+          "id": "P3",
+          "titulo": "Hipotireoidismo e drenagem linfatica",
+          "resposta": "Resposta:\nSim, pode sim. A drenagem linfática é uma técnica de tratamento de hipotireoidismo. A drenagem linfática é uma técnica de tratamento de hipotireoidismo. A drenagem linfática é uma técnica de tratamento de hipotireoidismo. A drenagem linfática é uma técnica de tratamento de hipotireoidismo.\n\nConsiderações clínicas:\nO caso deve ser interpretado no contexto da hipótese clínica de Hipotireoidismo.\n\nConduta/Orientação:\nRecomenda-se avaliação por Endocrinologista para correlação dos achados e definição individualizada da conduta. Qualquer início, suspensão ou ajuste de tratamento deve ser realizado após avaliação clínica e orientação do profissional responsável.\n\nLimitações:\nNão há informação de limitação respectiva na resposta. A orientação remota não substitui anamnese, avaliação clínica e avaliação presencial.",
+          "secoes_detectadas": 4,
+          "chars": 828
+        },
+        {
+          "id": "P4",
+          "titulo": "Dor toracica",
+          "resposta": "Resposta:\nA dor torácica aguda pode ser causada por vários fatores, como a dor de peito, dor de abdome, dor de estômago, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor de cabeça, dor",
+          "secoes_detectadas": 1,
+          "chars": 1099
+        },
+        {
+          "id": "P5",
+          "titulo": "Pos-colecistectomia",
+          "resposta": "Resposta:\nO quadro de refluxo gastroesofágico pode ser devido a uma cirurgia de emergência, como a cirurgia de uma vesícula hiperestática. O tratamento é devido a uma abordagem multidisciplinar, que inclui o acompanhamento com o cirurgião, o gastroenterologista e o nutricionista. O refluxo pode ser tratado com medicações, como antialérgicos, antipruriginantes, antihistamínicos, antialérgicos e antipruriginantes. O acompanhamento com o cirurgião é fundamental para o controle do refluxo e a prevenção de complicações.\n\nConsiderações clínicas:\nO caso deve ser interpretado no contexto da hipótese clínica de Refluxo gastroesofágico. A condição é apresentada no registro como distâctica que ha de ser considerada antes de qualquer orientação terapêutica.\n\nConduta/Orientação:\nRecomenda-se avaliação por Cirurgião do aparelho digestivo para correlação dos achados e definição individualizada da conduta. Qualquer início, suspensão ou ajuste de tratamento deve ser realizado após avaliação clínica e orientação do profissional responsável.\n\nLimitações:\nNão há informação sobre tratamento ou complicações associadas à condição",
+          "secoes_detectadas": 4,
+          "chars": 1124
+        }
+      ]
+    },
+    "llama31_qlora": {
+      "rotulo": "Llama 3.1 8B Instruct QLoRA",
+      "adapter": "/home/victor/cursos/FIAP/fase-3/fiap-tech-challenge-fase3/fine-tunning-llm/app/modelos/llama31_8b_instruct_lora",
+      "base": "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit",
+      "respostas": [
+        {
+          "id": "P1",
+          "titulo": "Soja e puberdade precoce",
+          "resposta": "Resposta:\nNão, o suco de soja não causa puberdade precoce. A puberdade precoce é um fenômeno complexo, com muitos fatores envolvidos, incluindo genéticos, hormonais e ambientais. O ideal é que você consulte um endocrinologista pediátrico para avaliar a causa da puberdade precoce e orientar a conduta.\n\nConsiderações clínicas:\nO caso deve ser interpretado no contexto da hipótese clínica de Puberdade Precoce.\n\nConduta/Orientação:\nRecomenda-se avaliação por Endocrinologista pediátrico para correlação dos achados e definição individualizada da conduta. A confirmação diagnóstica deve ser baseada em história clínica, exame físico e exames complementares quando indicados.\n\nLimitações:\nNão foram informados exames ou resultados complementares. Não há informação sobre tratamento ou terapia indicada. O registro está correlacionado à hipótese de Puberdade Precoce.",
+          "secoes_detectadas": 4,
+          "chars": 863
+        },
+        {
+          "id": "P2",
+          "titulo": "Vacina COVID e leucopenia",
+          "resposta": "Resposta:\nSim, pode. A vacina não interfere na leucopenia.\n\nConsiderações clínicas:\nO caso deve ser interpretado no contexto da hipótese clínica de Leucopenia. Os diagnósticos anteriores de leucopenia em acompanhamento devem ser considerados na avaliação da condição atual.\n\nConduta/Orientação:\nRecomenda-se avaliação por Hematologista pediátrico para correlação dos achados e definição individualizada da conduta. Qualquer início, suspensão ou ajuste de tratamento deve ser realizado após avaliação clínica e orientação do profissional responsável. Levar a lista de medicamentos, doses e horários de uso pode auxiliar na revisão terapêutica.\n\nLimitações:\nNão há informação sobre limitações de uso ou interações possíveis em relação à pergunta feita. Não há informação sobre se os medicamentos mencionados estão sendo usados atualmente. Não foram fornecidos dados sobre tolerabilidade ou efeitos adversos. A orientação remota não substitui anamnese, exame físico e avaliação clínica individualizada.",
+          "secoes_detectadas": 4,
+          "chars": 999
+        },
+        {
+          "id": "P3",
+          "titulo": "Hipotireoidismo e drenagem linfatica",
+          "resposta": "Resposta:\nPode sim, mas é importante que o médico que irá realizar a drenagem esteja ciente do seu diagnóstico e do seu tratamento.\n\nConsiderações clínicas:\nO caso deve ser interpretado no contexto da hipótese clínica de Hipotireoidismo. Os medicamentos em uso devem ser considerados na avaliação de resposta terapêutica, possíveis efeitos adversos e interações. O histórico de hipotireoidismo em tratamento é informação relevante para a avaliação atual.\n\nConduta/Orientação:\nRecomenda-se avaliação por Endocrinologista para correlação dos achados e definição individualizada da conduta. Qualquer início, suspensão ou ajuste de tratamento deve ser realizado após avaliação clínica e orientação do profissional responsável. Levar a lista de medicamentos, doses e horários de uso para a consulta.\n\nLimitações:\nNão há informação sobre limitações de confiabilidade ou validade da informação. Não há informação sobre confirmação diagnóstica. O status de confirmação diagnóstica deve ser considerado na interpretação do quadro atual.",
+          "secoes_detectadas": 4,
+          "chars": 1027
+        },
+        {
+          "id": "P4",
+          "titulo": "Dor toracica",
+          "resposta": "Resposta:\nO ideal é que o paciente seja avaliado por um cardiologista para que possa ser feito o diagnóstico correto e a conduta adequada.\n\nConsiderações clínicas:\nO caso deve ser interpretado no contexto da hipótese clínica de Dor No Peito. Os medicamentos informados são: Furosemida, Amlodipino.\n\nConduta/Orientação:\nRecomenda-se avaliação por Cardiologista para correlação dos achados e definição individualizada da conduta. A confirmação diagnóstica deve ser baseada em história clínica, exame físico e exames complementares quando indicados.\n\nLimitações:\nNão há informação sobre exames realizados. Não há informação sobre confirmação diagnóstica. O registro está inacabado.",
+          "secoes_detectadas": 4,
+          "chars": 678
+        },
+        {
+          "id": "P5",
+          "titulo": "Pos-colecistectomia",
+          "resposta": "Resposta:\nO melhor a ser realizado, neste caso é consultar um gastroenterologistahepato de sua confiança, a fim de esclarecer detalhadamente cada dúvida.\n\nConsiderações clínicas:\nO caso deve ser interpretado no contexto da hipótese clínica de Cálculos na vesícula biliar. Os medicamentos em uso devem ser considerados na avaliação de resposta terapêutica, interações e possíveis efeitos adversos.\n\nConduta/Orientação:\nRecomenda-se avaliação por Gastroenterologista para correlação dos achados e definição individualizada da conduta. A confirmação diagnóstica deve ser baseada em história clínica, exame físico e exames complementares quando indicados. Levar a lista de medicamentos, doses e horários de uso pode auxiliar na revisão terapêutica.\n\nLimitações:\nNão há informação sobre limitações de uso, interações medicamentosas ou orientações específicas para o paciente. Não há informação sobre confirmação do diagnóstico. A orientação remota não substitui anamnese, exame físico e avaliação clínica individualizada.",
+          "secoes_detectadas": 4,
+          "chars": 1016
+        }
+      ]
+    }
+  }
+}

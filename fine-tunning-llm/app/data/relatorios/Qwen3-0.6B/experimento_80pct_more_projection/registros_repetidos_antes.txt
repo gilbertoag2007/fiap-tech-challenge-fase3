@@ -1,0 +1,13 @@
+Linhas repetidas identificadas:
+Linha 2
+Linha 3
+Linha 7
+Linha 8
+Linha 16
+Linha 17
+Linha 3627
+Linha 3628
+Linha 6691
+Linha 6692
+Linha 7298
+Linha 7299

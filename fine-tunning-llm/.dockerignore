@@ -1,0 +1,14 @@
+.git
+.venv
+frontend/node_modules
+frontend/dist
+app/data/original
+app/data/processado
+app/data/relatorios
+app/modelos/llama31_8b_instruct_lora
+app/modelos/qwen_06b_lora
+unsloth_compiled_cache
+__pycache__
+*.pyc
+*.log
+.env

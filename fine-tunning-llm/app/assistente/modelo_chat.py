@@ -1,4 +1,4 @@
-"""Adaptador LangChain para o modelo Qwen ajustado localmente."""
+"""Adaptador LangChain para o modelo local ajustado (Llama ou Qwen)."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ class ServicoFineTuningAjustado(Protocol):
     """Contrato mínimo necessário para a inferência do modelo ajustado."""
 
     NOME_MODELO_BASE: str
+    chave_modelo: str
 
     def gerar_resposta_modelo_ajustado(
         self,
@@ -26,8 +27,8 @@ class ServicoFineTuningAjustado(Protocol):
         """Gera uma resposta local usando o adaptador LoRA."""
 
 
-class ModeloChatQwenLocal(BaseChatModel):
-    """Expõe o Qwen ajustado como um modelo de chat do LangChain."""
+class ModeloChatLocal(BaseChatModel):
+    """Expõe o adaptador LoRA local (Llama/Qwen) como chat model LangChain."""
 
     servico_fine_tuning: ServicoFineTuningAjustado
     max_novos_tokens: int = 384
@@ -36,11 +37,17 @@ class ModeloChatQwenLocal(BaseChatModel):
 
     @property
     def _llm_type(self) -> str:
-        return "qwen3-06b-lora-local"
+        chave = getattr(self.servico_fine_tuning, "chave_modelo", "local")
+        return f"{chave}-lora-local"
 
     @property
     def _identifying_params(self) -> dict[str, str]:
-        return {"modelo_base": self.servico_fine_tuning.NOME_MODELO_BASE}
+        return {
+            "modelo_base": self.servico_fine_tuning.NOME_MODELO_BASE,
+            "chave_modelo": getattr(
+                self.servico_fine_tuning, "chave_modelo", "local"
+            ),
+        }
 
     def _generate(
         self,
@@ -72,3 +79,7 @@ class ModeloChatQwenLocal(BaseChatModel):
         return ChatResult(
             generations=[ChatGeneration(message=AIMessage(content=resposta))]
         )
+
+
+# Compatibilidade com o nome trazido da branch feature/langchain-langgraph.
+ModeloChatQwenLocal = ModeloChatLocal

@@ -19,17 +19,11 @@ htmlcov/
 .vscode/
 .idea/
 
-# Dados sensiveis e arquivos gerados pelo pipeline
-app/data/relatorios/*
-app/data/processado/*
-!app/data/raw/.gitkeep
-app/data/processed/*
-!app/data/processed/.gitkeep
-app/data/training/*
-!app/data/training/.gitkeep
-
-
 # Arquivos temporarios criados pelo Excel
 ~$*.xlsx
 *.tmp
 *.log
+
+# Modelos grandes, caches e builds (Qwen10 da main permanece rastreado)
+frontend/node_modules/
+frontend/dist/

@@ -70,6 +70,20 @@ class AssistenteChain:
                 "pergunta_clinica": pergunta_normalizada,
             }
         ).strip()
+        resposta = re.sub(
+            r"<think>.*?</think>",
+            "",
+            resposta,
+            flags=re.IGNORECASE | re.DOTALL,
+        ).strip()
+        if "<think>" in resposta.lower():
+            inicio_resposta = re.search(
+                r"^[ \t]*Resposta[ \t]*:",
+                resposta,
+                flags=re.IGNORECASE | re.MULTILINE,
+            )
+            if inicio_resposta:
+                resposta = resposta[inicio_resposta.start():].strip()
         if not resposta:
             raise ValueError("O modelo não retornou um rascunho clínico.")
         secoes_ausentes = [
@@ -82,7 +96,11 @@ class AssistenteChain:
             )
         ]
         if secoes_ausentes:
-            raise ValueError("O rascunho não contém as seções obrigatórias.")
+            blocos = "\n".join(
+                f"{secao}: Informação insuficiente no contexto fornecido."
+                for secao in secoes_ausentes
+            )
+            resposta = f"{resposta.rstrip()}\n\n{blocos}"
 
         fontes = ", ".join(registro.fontes)
         return f"{resposta}\n\nFontes consultadas: {fontes}\n{AVISO_REVISAO_HUMANA}"

@@ -1,0 +1,2 @@
+Linhas repetidas identificadas:
+Registros repetidos não encontrados.
